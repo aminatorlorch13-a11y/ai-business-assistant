@@ -25,7 +25,7 @@ def test_executor_executes_permitted_action():
         operation=operation,
     )
 
-    result = executor.execute(make_action("create"))
+    result = executor.execute(make_action("create"), confirmed=True)
 
     assert result == "Operation completed."
     operation.execute.assert_called_once_with(make_action("create"))
@@ -86,3 +86,47 @@ def test_executor_respects_disabled_update_permission():
         executor.execute(make_action("update"))
 
     operation.execute.assert_not_called()
+
+
+def test_executor_requires_confirmation_for_unsafe_action():
+    operation = Mock(spec=BusinessOperation)
+    safety_policy = Mock()
+    safety_policy.requires_confirmation.return_value = True
+
+    executor = ActionExecutor(
+        policy=ActionPolicy(),
+        operation=operation,
+        safety_policy=safety_policy,
+    )
+
+    with pytest.raises(PermissionError, match="confirmation"):
+        executor.execute(make_action("create"))
+
+    safety_policy.requires_confirmation.assert_called_once_with(
+        make_action("create")
+    )
+    operation.execute.assert_not_called()
+
+
+def test_executor_executes_action_when_confirmation_is_not_required():
+    operation = Mock(spec=BusinessOperation)
+    operation.execute.return_value = "Operation completed."
+
+    safety_policy = Mock()
+    safety_policy.requires_confirmation.return_value = False
+
+    executor = ActionExecutor(
+        policy=ActionPolicy(),
+        operation=operation,
+        safety_policy=safety_policy,
+    )
+
+    result = executor.execute(make_action("create"), confirmed=True)
+
+    assert result == "Operation completed."
+    safety_policy.requires_confirmation.assert_called_once_with(
+        make_action("create")
+    )
+    operation.execute.assert_called_once_with(
+        make_action("create")
+    )

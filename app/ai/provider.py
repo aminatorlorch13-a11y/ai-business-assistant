@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 
+from app.assistant.interpretation import AIInterpretation
 from app.assistant.message import AssistantMessage
-from app.assistant.response import AssistantResponse
 
 
 class AIProvider(ABC):
     """Interface for the intelligence provider used by the assistant."""
 
     @abstractmethod
-    def respond(self, message: AssistantMessage) -> AssistantResponse:
-        """Generate an assistant response."""
+    def interpret(self, message: AssistantMessage) -> AIInterpretation:
+        """Interpret an incoming message into structured assistant instructions."""
         raise NotImplementedError

@@ -1,7 +1,7 @@
-from app.assistant.action_executor import ActionExecutor
 from app.assistant.message import AssistantMessage
 from app.assistant.processor import AssistantProcessor
 from app.assistant.response import AssistantResponse
+from app.assistant.action_executor import ActionExecutor
 from app.models.business import Business
 
 
@@ -18,7 +18,11 @@ class AssistantOrchestrator:
         self._processor = processor
         self._executor = executor
 
-    def handle(self, message: AssistantMessage) -> AssistantResponse:
+    def handle(
+        self,
+        message: AssistantMessage,
+        confirmed: bool = False,
+    ) -> AssistantResponse:
         """Process a message and execute its interpreted action."""
 
         if message.business_id != self._business.business_id:
@@ -28,15 +32,23 @@ class AssistantOrchestrator:
 
         if interpretation.intent.business_id != self._business.business_id:
             raise ValueError(
-                "AI interpretation does not belong to this business."
+                "AI interpretation intent does not belong to this business."
             )
 
         if interpretation.action.business_id != self._business.business_id:
             raise ValueError(
-                "AI action does not belong to this business."
+                "AI interpretation action does not belong to this business."
             )
 
-        result = self._executor.execute(interpretation.action)
+        if confirmed:
+            result = self._executor.execute(
+                interpretation.action,
+                confirmed=True,
+            )
+        else:
+            result = self._executor.execute(
+                interpretation.action,
+            )
 
         return AssistantResponse(
             business_id=self._business.business_id,
