@@ -1,3 +1,4 @@
+from app.ai.errors import AIProviderError
 from app.ai.provider import AIProvider
 from app.ai.raw_provider import RawAIProvider
 from app.ai.response_parser import AIResponseParser
@@ -18,7 +19,11 @@ class InterpretingAIProvider(AIProvider):
 
     def interpret(self, message: AssistantMessage) -> AIInterpretation:
         """Generate raw AI output and parse it into an interpretation."""
-        raw_response = self._raw_provider.generate(message)
+
+        try:
+            raw_response = self._raw_provider.generate(message)
+        except Exception as exc:
+            raise AIProviderError("AI provider failed.") from exc
 
         return self._parser.parse(
             raw_response,

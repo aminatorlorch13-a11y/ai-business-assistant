@@ -81,3 +81,48 @@ def test_interpreting_provider_implements_ai_provider():
     from app.ai.provider import AIProvider
 
     assert issubclass(InterpretingAIProvider, AIProvider)
+
+def test_interpreting_provider_wraps_raw_provider_failure():
+    from app.ai.errors import AIProviderError
+
+    raw_provider = Mock(spec=RawAIProvider)
+    raw_provider.generate.side_effect = RuntimeError("Provider unavailable")
+
+    provider = InterpretingAIProvider(raw_provider)
+
+    with pytest.raises(AIProviderError, match="AI provider failed"):
+        provider.interpret(make_message())
+
+
+def test_interpreting_provider_preserves_parser_errors():
+    raw_provider = Mock(spec=RawAIProvider)
+    raw_provider.generate.return_value = {
+        "intent_type": "business_task",
+        "instruction": "Create an appointment.",
+        "action_type": "hack",
+        "target": "appointment",
+        "action_instruction": "Create an appointment.",
+    }
+
+    provider = InterpretingAIProvider(raw_provider)
+
+    with pytest.raises(ValueError):
+        provider.interpret(make_message())
+
+
+def test_interpreting_provider_does_not_call_parser_when_raw_provider_fails():
+    from app.ai.errors import AIProviderError
+
+    raw_provider = Mock(spec=RawAIProvider)
+    raw_provider.generate.side_effect = RuntimeError("Network failure")
+
+    parser = Mock()
+    provider = InterpretingAIProvider(
+        raw_provider=raw_provider,
+        parser=parser,
+    )
+
+    with pytest.raises(AIProviderError):
+        provider.interpret(make_message())
+
+    parser.parse.assert_not_called()
