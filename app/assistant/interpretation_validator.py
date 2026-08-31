@@ -42,30 +42,39 @@ class AIInterpretationValidator:
                 "AI interpretation action does not belong to this business."
             )
 
-        if interpretation.action.target not in SUPPORTED_TARGETS:
+        intent_type = interpretation.intent.intent_type
+        action_type = interpretation.action.action_type
+        target = interpretation.action.target
+
+        if intent_type not in ALLOWED_ACTIONS_BY_INTENT:
             raise ValueError(
-                f"Unsupported action target: "
-                f"{interpretation.action.target}"
+                f"Unknown intent type: {intent_type}."
             )
 
-        allowed_actions = ALLOWED_ACTIONS_BY_INTENT[
-            interpretation.intent.intent_type
-        ]
-
-        if interpretation.action.action_type not in allowed_actions:
+        if action_type not in ALLOWED_TARGETS_BY_ACTION:
             raise ValueError(
-                f"Action '{interpretation.action.action_type}' is not valid "
-                f"for intent '{interpretation.intent.intent_type}'."
+                f"Unknown action type: {action_type}."
             )
 
-        allowed_targets = ALLOWED_TARGETS_BY_ACTION[
-            interpretation.action.action_type
-        ]
-
-        if interpretation.action.target not in allowed_targets:
+        if target not in SUPPORTED_TARGETS:
             raise ValueError(
-                f"Target '{interpretation.action.target}' is not valid "
-                f"for action '{interpretation.action.action_type}'."
+                f"Unsupported action target: {target}"
+            )
+
+        allowed_actions = ALLOWED_ACTIONS_BY_INTENT[intent_type]
+
+        if action_type not in allowed_actions:
+            raise ValueError(
+                f"Action '{action_type}' is not valid "
+                f"for intent '{intent_type}'."
+            )
+
+        allowed_targets = ALLOWED_TARGETS_BY_ACTION[action_type]
+
+        if target not in allowed_targets:
+            raise ValueError(
+                f"Target '{target}' is not valid "
+                f"for action '{action_type}'."
             )
 
         return interpretation

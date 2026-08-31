@@ -196,3 +196,32 @@ def test_validator_rejects_action_with_unexpected_target():
             interpretation,
             business_id="business-001",
         )
+
+def test_validator_rejects_unknown_intent_without_key_error():
+    validator = AIInterpretationValidator()
+
+    interpretation = AIInterpretation(
+        intent=AssistantIntent(
+            business_id="business-001",
+            intent_type="general_question",
+            instruction="Answer the customer.",
+        ),
+        action=AssistantAction(
+            business_id="business-001",
+            action_type="none",
+            target="assistant",
+            instruction="No action required.",
+        ),
+    )
+
+    object.__setattr__(
+        interpretation.intent,
+        "intent_type",
+        "future_unknown_intent",
+    )
+
+    with pytest.raises(ValueError, match="Unknown intent"):
+        validator.validate(
+            interpretation,
+            business_id="business-001",
+        )
