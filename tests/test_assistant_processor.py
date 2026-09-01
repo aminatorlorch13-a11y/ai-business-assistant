@@ -5,6 +5,7 @@ from app.assistant.intent import AssistantIntent
 from app.assistant.interpretation import AIInterpretation
 from app.assistant.interpretation_validator import AIInterpretationValidator
 from app.assistant.message import AssistantMessage
+from app.ai.provider import AIProvider
 from app.assistant.processor import AssistantProcessor
 
 
@@ -25,7 +26,7 @@ def make_interpretation() -> AIInterpretation:
 
 
 def test_processor_delegates_to_ai_provider():
-    provider = Mock()
+    provider = Mock(spec=AIProvider)
     expected_interpretation = make_interpretation()
     provider.interpret.return_value = expected_interpretation
 

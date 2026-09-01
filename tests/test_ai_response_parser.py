@@ -248,3 +248,104 @@ def test_parser_rejects_non_string_business_id():
             },
             business_id="business-001",
         )
+
+
+def test_parser_rejects_non_string_action_type_without_type_error():
+    parser = AIResponseParser()
+
+    with pytest.raises(ValueError, match="action_type.*string"):
+        parser.parse(
+            {
+                "intent_type": "business_task",
+                "instruction": "Create an appointment.",
+                "action_type": ["create"],
+                "target": "appointment",
+                "action_instruction": "Create an appointment.",
+            },
+            business_id="business-001",
+        )
+
+
+def test_parser_rejects_non_string_target_without_type_error():
+    parser = AIResponseParser()
+
+    with pytest.raises(ValueError, match="target.*string"):
+        parser.parse(
+            {
+                "intent_type": "business_task",
+                "instruction": "Create an appointment.",
+                "action_type": "create",
+                "target": {"name": "appointment"},
+                "action_instruction": "Create an appointment.",
+            },
+            business_id="business-001",
+        )
+
+
+def test_parser_rejects_non_string_intent_type_without_type_error():
+    parser = AIResponseParser()
+
+    with pytest.raises(ValueError, match="intent_type.*string"):
+        parser.parse(
+            {
+                "intent_type": ["business_task"],
+                "instruction": "Create an appointment.",
+                "action_type": "create",
+                "target": "appointment",
+                "action_instruction": "Create an appointment.",
+            },
+            business_id="business-001",
+        )
+
+
+def test_parser_rejects_non_string_supplied_business_id():
+    parser = AIResponseParser()
+
+    with pytest.raises(ValueError, match="business_id must be a string"):
+        parser.parse(
+            {
+                "business_id": 123,
+                "intent_type": "business_task",
+                "instruction": "Create an appointment.",
+                "action_type": "create",
+                "target": "appointment",
+                "action_instruction": "Create an appointment.",
+            },
+            business_id="business-001",
+        )
+
+
+def test_parser_rejects_empty_supplied_business_id():
+    parser = AIResponseParser()
+
+    with pytest.raises(
+        ValueError,
+        match="business_id must be a non-empty string",
+    ):
+        parser.parse(
+            {
+                "business_id": "   ",
+                "intent_type": "business_task",
+                "instruction": "Create an appointment.",
+                "action_type": "create",
+                "target": "appointment",
+                "action_instruction": "Create an appointment.",
+            },
+            business_id="business-001",
+        )
+
+
+def test_parser_rejects_unhashable_action_type_without_type_error():
+    parser = AIResponseParser()
+
+    with pytest.raises(ValueError, match="action_type.*string"):
+        parser.parse(
+            {
+                "intent_type": "business_task",
+                "instruction": "Create an appointment.",
+                "action_type": {"type": "create"},
+                "target": "appointment",
+                "action_instruction": "Create an appointment.",
+            },
+            business_id="business-001",
+        )

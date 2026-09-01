@@ -225,3 +225,37 @@ def test_validator_rejects_unknown_intent_without_key_error():
             interpretation,
             business_id="business-001",
         )
+
+
+def test_validator_rejects_non_interpretation():
+    validator = AIInterpretationValidator()
+
+    with pytest.raises(TypeError, match="AIInterpretation"):
+        validator.validate(
+            object(),
+            "business-001",
+        )
+
+
+def test_validator_rejects_non_string_business_id():
+    validator = AIInterpretationValidator()
+
+    interpretation = make_interpretation("business_task", "create")
+
+    with pytest.raises(ValueError, match="business_id"):
+        validator.validate(
+            interpretation,
+            123,
+        )
+
+
+def test_validator_rejects_oversized_business_id():
+    validator = AIInterpretationValidator()
+
+    interpretation = make_interpretation("business_task", "create")
+
+    with pytest.raises(ValueError, match="maximum"):
+        validator.validate(
+            interpretation,
+            "x" * 129,
+        )

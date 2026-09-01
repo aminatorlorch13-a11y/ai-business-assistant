@@ -43,3 +43,27 @@ def test_assistant_rejects_request_for_another_business():
 
     with pytest.raises(ValueError):
         assistant.handle(request)
+
+
+def test_core_rejects_invalid_business_dependency():
+    with pytest.raises(TypeError, match="business"):
+        AssistantCore(object())
+
+
+def test_core_rejects_invalid_request_type():
+    assistant = AssistantCore(make_business())
+
+    with pytest.raises(TypeError, match="request"):
+        assistant.handle("Good morning.")
+
+
+def test_core_does_not_process_wrong_business_request():
+    assistant = AssistantCore(make_business())
+
+    request = AssistantRequest(
+        business_id="business-999",
+        message="Hello.",
+    )
+
+    with pytest.raises(ValueError, match="business"):
+        assistant.handle(request)

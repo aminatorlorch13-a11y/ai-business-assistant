@@ -130,3 +130,51 @@ def test_executor_executes_action_when_confirmation_is_not_required():
     operation.execute.assert_called_once_with(
         make_action("create")
     )
+
+
+def test_executor_rejects_non_action_input():
+    operation = Mock(spec=BusinessOperation)
+    executor = ActionExecutor(
+        policy=ActionPolicy(),
+        operation=operation,
+    )
+
+    with pytest.raises(TypeError, match="AssistantAction"):
+        executor.execute(object())
+
+
+def test_executor_rejects_non_boolean_confirmation():
+    operation = Mock(spec=BusinessOperation)
+    executor = ActionExecutor(
+        policy=ActionPolicy(),
+        operation=operation,
+    )
+
+    with pytest.raises(TypeError, match="boolean"):
+        executor.execute(make_action("none"), confirmed="yes")
+
+
+def test_executor_rejects_non_string_operation_result():
+    operation = Mock(spec=BusinessOperation)
+    operation.execute.return_value = 123
+
+    executor = ActionExecutor(
+        policy=ActionPolicy(),
+        operation=operation,
+    )
+
+    with pytest.raises(TypeError, match="string result"):
+        executor.execute(make_action("none"))
+
+
+def test_executor_rejects_empty_operation_result():
+    operation = Mock(spec=BusinessOperation)
+    operation.execute.return_value = "   "
+
+    executor = ActionExecutor(
+        policy=ActionPolicy(),
+        operation=operation,
+    )
+
+    with pytest.raises(ValueError, match="empty result"):
+        executor.execute(make_action("none"))

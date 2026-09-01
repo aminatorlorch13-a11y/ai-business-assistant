@@ -2,35 +2,37 @@ from app.assistant.interpretation import AIInterpretation
 
 
 ALLOWED_ACTIONS_BY_INTENT = {
-    "general_question": {"none"},
-    "customer_request": {"none", "create", "update"},
-    "business_task": {"none", "create", "update", "delete"},
+    "general_question": frozenset({"none"}),
+    "customer_request": frozenset({"none", "create", "update"}),
+    "business_task": frozenset({"none", "create", "update", "delete"}),
 }
-
-
-SUPPORTED_TARGETS = {
-    "appointment",
-    "assistant",
-}
-
 
 ALLOWED_TARGETS_BY_ACTION = {
-    "none": {"assistant", "appointment"},
-    "create": {"appointment"},
-    "update": {"appointment"},
-    "delete": {"appointment"},
+    "none": frozenset({"assistant", "appointment"}),
+    "create": frozenset({"appointment"}),
+    "update": frozenset({"appointment"}),
+    "delete": frozenset({"appointment"}),
 }
 
 
 class AIInterpretationValidator:
-    """Validates AI interpretations before they reach the execution layer."""
+    """Validates AI interpretations before they reach execution."""
+
+    MAX_BUSINESS_ID_LENGTH = 128
 
     def validate(
         self,
         interpretation: AIInterpretation,
         business_id: str,
     ) -> AIInterpretation:
-        """Validate an AI interpretation against the active business."""
+        """Enforce business isolation and semantic action constraints."""
+
+        self._validate_business_id(business_id)
+
+        if not isinstance(interpretation, AIInterpretation):
+            raise TypeError(
+                "interpretation must be an AIInterpretation."
+            )
 
         if interpretation.intent.business_id != business_id:
             raise ValueError(
@@ -46,7 +48,9 @@ class AIInterpretationValidator:
         action_type = interpretation.action.action_type
         target = interpretation.action.target
 
-        if intent_type not in ALLOWED_ACTIONS_BY_INTENT:
+        allowed_actions = ALLOWED_ACTIONS_BY_INTENT.get(intent_type)
+
+        if allowed_actions is None:
             raise ValueError(
                 f"Unknown intent type: {intent_type}."
             )
@@ -55,13 +59,6 @@ class AIInterpretationValidator:
             raise ValueError(
                 f"Unknown action type: {action_type}."
             )
-
-        if target not in SUPPORTED_TARGETS:
-            raise ValueError(
-                f"Unsupported action target: {target}"
-            )
-
-        allowed_actions = ALLOWED_ACTIONS_BY_INTENT[intent_type]
 
         if action_type not in allowed_actions:
             raise ValueError(
@@ -78,3 +75,23 @@ class AIInterpretationValidator:
             )
 
         return interpretation
+
+    @classmethod
+    def _validate_business_id(
+        cls,
+        business_id: object,
+    ) -> None:
+        if not isinstance(business_id, str):
+            raise ValueError(
+                "business_id must be a non-empty string."
+            )
+
+        if not business_id.strip():
+            raise ValueError(
+                "business_id must be a non-empty string."
+            )
+
+        if len(business_id) > cls.MAX_BUSINESS_ID_LENGTH:
+            raise ValueError(
+                "business_id exceeds the maximum allowed length."
+            )

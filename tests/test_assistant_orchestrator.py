@@ -103,3 +103,29 @@ def test_orchestrator_rejects_interpretation_for_another_business():
         orchestrator.handle(message)
 
     executor.execute.assert_not_called()
+
+def test_orchestrator_does_not_return_success_when_execution_fails():
+    processor = Mock()
+    executor = Mock()
+
+    processor.process.return_value = make_interpretation()
+    executor.execute.side_effect = RuntimeError("Appointment service unavailable")
+
+    orchestrator = AssistantOrchestrator(
+        business=make_business(),
+        processor=processor,
+        executor=executor,
+    )
+
+    message = AssistantMessage(
+        business_id="business-001",
+        content="Please create an appointment.",
+    )
+
+    with pytest.raises(RuntimeError, match="Appointment service unavailable"):
+        orchestrator.handle(message)
+
+    processor.process.assert_called_once_with(message)
+    executor.execute.assert_called_once_with(
+        make_interpretation().action
+    )
