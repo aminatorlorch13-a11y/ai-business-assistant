@@ -1,6 +1,7 @@
 import pytest
 
 from app.assistant.capability import Capability, CapabilityRequest
+from app.commercial.entitlements import BusinessEntitlements
 from app.trust.capability_policy import CapabilityPolicy
 
 
@@ -148,3 +149,71 @@ def test_empty_policy_denies_every_current_capability():
         assert policy.allows(
             make_request(capability)
         ) is False
+
+
+def test_policy_can_be_built_from_business_entitlements():
+    entitlements = BusinessEntitlements(
+        business_id="business-001",
+        capabilities=frozenset({
+            Capability.CONVERSATION,
+            Capability.TIME,
+            Capability.RESEARCH,
+        }),
+    )
+
+    policy = CapabilityPolicy.from_entitlements(entitlements)
+
+    assert policy.business_id == "business-001"
+    assert policy.allowed_capabilities == entitlements.capabilities
+    assert policy.allows(make_request(Capability.CONVERSATION)) is True
+    assert policy.allows(make_request(Capability.TIME)) is True
+    assert policy.allows(make_request(Capability.RESEARCH)) is True
+    assert policy.allows(make_request(Capability.VOICE)) is False
+
+
+def test_policy_from_entitlements_preserves_full_capability_access():
+    entitlements = BusinessEntitlements(
+        business_id="business-001",
+        capabilities=frozenset(Capability),
+    )
+
+    policy = CapabilityPolicy.from_entitlements(entitlements)
+
+    for capability in Capability:
+        assert policy.allows(make_request(capability)) is True
+
+
+def test_policy_from_empty_entitlements_denies_all_capabilities():
+    entitlements = BusinessEntitlements(
+        business_id="business-001",
+        capabilities=frozenset(),
+    )
+
+    policy = CapabilityPolicy.from_entitlements(entitlements)
+
+    for capability in Capability:
+        assert policy.allows(make_request(capability)) is False
+
+
+@pytest.mark.parametrize(
+    "invalid_entitlements",
+    [None, "entitlements", 123],
+)
+def test_policy_from_entitlements_rejects_invalid_input(
+    invalid_entitlements,
+):
+    with pytest.raises(TypeError, match="entitlements"):
+        CapabilityPolicy.from_entitlements(invalid_entitlements)
+
+
+def test_policy_from_entitlements_derives_business_identity():
+    entitlements = BusinessEntitlements(
+        business_id="business-001",
+        capabilities=frozenset({
+            Capability.CONVERSATION,
+        }),
+    )
+
+    policy = CapabilityPolicy.from_entitlements(entitlements)
+
+    assert policy.business_id == entitlements.business_id

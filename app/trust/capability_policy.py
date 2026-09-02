@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.assistant.capability import Capability, CapabilityRequest
+from app.commercial.entitlements import BusinessEntitlements
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,30 @@ class CapabilityPolicy:
                 raise TypeError(
                     "allowed_capabilities must contain only Capability values."
                 )
+
+    @classmethod
+    def from_entitlements(
+        cls,
+        entitlements: BusinessEntitlements,
+    ) -> "CapabilityPolicy":
+        """
+        Build an authorization policy from commercial entitlements.
+
+        Entitlements are the authoritative commercial input. The resulting
+        policy remains responsible for authorization decisions.
+
+        Pricing, trial state, and commercial agreement details do not enter
+        the capability authorization logic.
+        """
+        if not isinstance(entitlements, BusinessEntitlements):
+            raise TypeError(
+                "entitlements must be a BusinessEntitlements."
+            )
+
+        return cls(
+            business_id=entitlements.business_id,
+            allowed_capabilities=entitlements.capabilities,
+        )
 
     def allows(self, request: CapabilityRequest) -> bool:
         """
