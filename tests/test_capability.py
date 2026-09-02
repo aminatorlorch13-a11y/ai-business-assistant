@@ -3,6 +3,7 @@ import pytest
 from app.assistant.capability import (
     Capability,
     CapabilityRequest,
+    CapabilityResult,
 )
 
 
@@ -81,4 +82,87 @@ def test_capability_request_rejects_invalid_reason(reason):
             capability=Capability.CONVERSATION,
             business_id="business-001",
             reason=reason,
+        )
+
+
+def make_result(
+    capability: Capability = Capability.CONVERSATION,
+) -> CapabilityResult:
+    return CapabilityResult(
+        capability=capability,
+        business_id="business-001",
+        success=True,
+        message="Capability completed.",
+    )
+
+
+def test_capability_result_accepts_valid_input():
+    result = make_result()
+
+    assert result.capability is Capability.CONVERSATION
+    assert result.business_id == "business-001"
+    assert result.success is True
+    assert result.message == "Capability completed."
+
+
+def test_capability_result_is_immutable():
+    result = make_result()
+
+    with pytest.raises(AttributeError):
+        result.message = "Changed."
+
+
+@pytest.mark.parametrize(
+    "capability",
+    [None, "conversation", 123],
+)
+def test_capability_result_rejects_invalid_capability(capability):
+    with pytest.raises(TypeError, match="capability"):
+        CapabilityResult(
+            capability=capability,
+            business_id="business-001",
+            success=True,
+            message="Completed.",
+        )
+
+
+@pytest.mark.parametrize(
+    "business_id",
+    ["", "   ", None, 123],
+)
+def test_capability_result_rejects_invalid_business_id(business_id):
+    with pytest.raises((TypeError, ValueError), match="business_id"):
+        CapabilityResult(
+            capability=Capability.CONVERSATION,
+            business_id=business_id,
+            success=True,
+            message="Completed.",
+        )
+
+
+@pytest.mark.parametrize(
+    "success",
+    [None, "true", 1, 0],
+)
+def test_capability_result_rejects_invalid_success(success):
+    with pytest.raises(TypeError, match="success"):
+        CapabilityResult(
+            capability=Capability.CONVERSATION,
+            business_id="business-001",
+            success=success,
+            message="Completed.",
+        )
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["", "   ", None, 123],
+)
+def test_capability_result_rejects_invalid_message(message):
+    with pytest.raises((TypeError, ValueError), match="message"):
+        CapabilityResult(
+            capability=Capability.CONVERSATION,
+            business_id="business-001",
+            success=True,
+            message=message,
         )

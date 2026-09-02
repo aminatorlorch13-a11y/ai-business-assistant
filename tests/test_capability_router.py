@@ -3,6 +3,7 @@ import pytest
 from app.assistant.capability import (
     Capability,
     CapabilityRequest,
+    CapabilityResult,
 )
 from app.assistant.capability_router import CapabilityRouter
 
@@ -22,7 +23,12 @@ def test_router_routes_to_registered_handler():
 
     def handler(request):
         calls.append(request)
-        return "handled"
+        return CapabilityResult(
+            capability=request.capability,
+            business_id=request.business_id,
+            success=True,
+            message="Handled.",
+        )
 
     router = CapabilityRouter(
         {
@@ -34,14 +40,22 @@ def test_router_routes_to_registered_handler():
 
     result = router.route(request)
 
-    assert result == "handled"
+    assert result.capability is Capability.CONVERSATION
+    assert result.business_id == "business-001"
+    assert result.success is True
+    assert result.message == "Handled."
     assert calls == [request]
 
 
 def test_router_supports_registered_capability():
     router = CapabilityRouter(
         {
-            Capability.RESEARCH: lambda request: "researched",
+            Capability.RESEARCH: lambda request: CapabilityResult(
+                capability=request.capability,
+                business_id=request.business_id,
+                success=True,
+                message="Researched.",
+            ),
         }
     )
 
@@ -51,7 +65,12 @@ def test_router_supports_registered_capability():
 def test_router_reports_unsupported_capability():
     router = CapabilityRouter(
         {
-            Capability.RESEARCH: lambda request: "researched",
+            Capability.RESEARCH: lambda request: CapabilityResult(
+                capability=request.capability,
+                business_id=request.business_id,
+                success=True,
+                message="Researched.",
+            ),
         }
     )
 
@@ -61,7 +80,12 @@ def test_router_reports_unsupported_capability():
 def test_router_rejects_unregistered_capability():
     router = CapabilityRouter(
         {
-            Capability.RESEARCH: lambda request: "researched",
+            Capability.RESEARCH: lambda request: CapabilityResult(
+                capability=request.capability,
+                business_id=request.business_id,
+                success=True,
+                message="Researched.",
+            ),
         }
     )
 
@@ -72,7 +96,12 @@ def test_router_rejects_unregistered_capability():
 def test_router_rejects_non_request():
     router = CapabilityRouter(
         {
-            Capability.CONVERSATION: lambda request: "handled",
+            Capability.CONVERSATION: lambda request: CapabilityResult(
+                capability=request.capability,
+                business_id=request.business_id,
+                success=True,
+                message="Handled.",
+            ),
         }
     )
 
@@ -93,7 +122,12 @@ def test_router_rejects_invalid_handler_key():
     with pytest.raises(TypeError, match="Capability"):
         CapabilityRouter(
             {
-                "research": lambda request: "handled",
+                "research": lambda request: CapabilityResult(
+                    capability=Capability.RESEARCH,
+                    business_id=request.business_id,
+                    success=True,
+                    message="Handled.",
+                ),
             }
         )
 
@@ -112,7 +146,12 @@ def test_router_does_not_call_handler_for_unsupported_capability():
 
     def handler(request):
         calls.append(request)
-        return "handled"
+        return CapabilityResult(
+            capability=request.capability,
+            business_id=request.business_id,
+            success=True,
+            message="Handled.",
+        )
 
     router = CapabilityRouter(
         {
@@ -131,11 +170,21 @@ def test_router_can_register_multiple_capabilities():
 
     def research_handler(request):
         calls.append(("research", request))
-        return "research-result"
+        return CapabilityResult(
+            capability=request.capability,
+            business_id=request.business_id,
+            success=True,
+            message="Research result.",
+        )
 
     def communication_handler(request):
         calls.append(("communication", request))
-        return "communication-result"
+        return CapabilityResult(
+            capability=request.capability,
+            business_id=request.business_id,
+            success=True,
+            message="Communication result.",
+        )
 
     router = CapabilityRouter(
         {
@@ -152,6 +201,79 @@ def test_router_can_register_multiple_capabilities():
         make_request(Capability.COMMUNICATION)
     )
 
-    assert research_result == "research-result"
-    assert communication_result == "communication-result"
+    assert research_result.message == "Research result."
+    assert communication_result.message == "Communication result."
     assert len(calls) == 2
+
+
+def test_router_rejects_handler_returning_arbitrary_object():
+    router = CapabilityRouter(
+        {
+            Capability.CONVERSATION: lambda request: "not-a-result",
+        }
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="CapabilityResult",
+    ):
+        router.route(make_request())
+
+
+def test_router_rejects_result_for_wrong_capability():
+    router = CapabilityRouter(
+        {
+            Capability.RESEARCH: lambda request: CapabilityResult(
+                capability=Capability.CONVERSATION,
+                business_id=request.business_id,
+                success=True,
+                message="Wrong capability.",
+            ),
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="capability",
+    ):
+        router.route(make_request(Capability.RESEARCH))
+
+
+def test_router_rejects_result_for_wrong_business():
+    router = CapabilityRouter(
+        {
+            Capability.RESEARCH: lambda request: CapabilityResult(
+                capability=request.capability,
+                business_id="business-999",
+                success=True,
+                message="Wrong business.",
+            ),
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="business",
+    ):
+        router.route(make_request(Capability.RESEARCH))
+
+
+def test_router_returns_valid_capability_result():
+    router = CapabilityRouter(
+        {
+            Capability.RESEARCH: lambda request: CapabilityResult(
+                capability=request.capability,
+                business_id=request.business_id,
+                success=True,
+                message="Research completed.",
+            ),
+        }
+    )
+
+    result = router.route(make_request(Capability.RESEARCH))
+
+    assert isinstance(result, CapabilityResult)
+    assert result.capability is Capability.RESEARCH
+    assert result.business_id == "business-001"
+    assert result.success is True
+    assert result.message == "Research completed."

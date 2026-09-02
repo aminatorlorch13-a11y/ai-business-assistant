@@ -51,6 +51,44 @@ class CapabilityDecision:
 
 
 @dataclass(frozen=True)
+class CapabilityResult:
+    """
+    Immutable result returned by a capability handler.
+
+    A result describes the outcome of capability execution.
+    It does not grant authorization and does not perform another action.
+    """
+
+    capability: Capability
+    business_id: str
+    success: bool
+    message: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.capability, Capability):
+            raise TypeError("capability must be a Capability.")
+
+        if not isinstance(self.business_id, str):
+            raise TypeError("business_id must be a string.")
+
+        if not self.business_id.strip():
+            raise ValueError(
+                "business_id must be a non-empty string."
+            )
+
+        if not isinstance(self.success, bool):
+            raise TypeError("success must be a boolean.")
+
+        if not isinstance(self.message, str):
+            raise TypeError("message must be a string.")
+
+        if not self.message.strip():
+            raise ValueError(
+                "message must be a non-empty string."
+            )
+
+
+@dataclass(frozen=True)
 class CapabilityRequest:
     """
     Immutable request to execute a high-level assistant capability.
