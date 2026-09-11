@@ -16,7 +16,7 @@ def test_android_speech_engine_speaks_with_default_female_profile():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     run.assert_called_once_with(
@@ -26,7 +26,6 @@ def test_android_speech_engine_speaks_with_default_female_profile():
             "1.0",
             "The assistant is ready.",
         ],
-        check=True,
     )
 
 
@@ -39,7 +38,7 @@ def test_android_speech_engine_speaks_with_default_male_profile():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     run.assert_called_once_with(
@@ -49,7 +48,6 @@ def test_android_speech_engine_speaks_with_default_male_profile():
             "1.0",
             "The assistant is ready.",
         ],
-        check=True,
     )
 
 
@@ -68,7 +66,7 @@ def test_android_speech_engine_does_not_fake_voice_identity_with_pitch():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(female_request)
         engine.speak(male_request)
 
@@ -90,7 +88,7 @@ def test_android_speech_engine_passes_custom_speed():
         speed=0.75,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     run.assert_called_once_with(
@@ -100,7 +98,6 @@ def test_android_speech_engine_passes_custom_speed():
             "0.75",
             "Speak more slowly.",
         ],
-        check=True,
     )
 
 
@@ -122,7 +119,7 @@ def test_android_speech_engine_combines_profile_speed_with_request_speed():
         speed=0.75,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     run.assert_called_once_with(
@@ -132,7 +129,6 @@ def test_android_speech_engine_combines_profile_speed_with_request_speed():
             "0.6000000000000001",
             "Combined speed.",
         ],
-        check=True,
     )
 
 
@@ -155,7 +151,7 @@ def test_android_speech_engine_passes_language():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     run.assert_called_once_with(
@@ -167,7 +163,6 @@ def test_android_speech_engine_passes_language():
             "1.0",
             "Hello.",
         ],
-        check=True,
     )
 
 
@@ -190,7 +185,7 @@ def test_android_speech_engine_passes_region():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     run.assert_called_once_with(
@@ -202,7 +197,6 @@ def test_android_speech_engine_passes_region():
             "1.0",
             "Hello.",
         ],
-        check=True,
     )
 
 
@@ -225,7 +219,7 @@ def test_android_speech_engine_passes_variant():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     run.assert_called_once_with(
@@ -237,7 +231,6 @@ def test_android_speech_engine_passes_variant():
             "1.0",
             "Hello.",
         ],
-        check=True,
     )
 
 
@@ -262,7 +255,7 @@ def test_android_speech_engine_passes_android_provider_options():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     run.assert_called_once_with(
@@ -278,7 +271,6 @@ def test_android_speech_engine_passes_android_provider_options():
             "1.0",
             "The assistant is ready.",
         ],
-        check=True,
     )
 
 
@@ -301,7 +293,7 @@ def test_android_speech_engine_rejects_non_android_provider():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         with pytest.raises(
             ValueError,
             match="cannot use a non-Android provider profile",
@@ -330,7 +322,7 @@ def test_android_speech_engine_does_not_interpret_provider_voice_id():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     command = run.call_args.args[0]
@@ -341,7 +333,7 @@ def test_android_speech_engine_does_not_interpret_provider_voice_id():
 def test_android_speech_engine_rejects_invalid_request():
     engine = AndroidSpeechEngine()
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         with pytest.raises(
             TypeError,
             match="SpeechRequest",
@@ -370,7 +362,7 @@ def test_android_speech_engine_rejects_unconfigured_voice():
 
     engine = AndroidSpeechEngine(resolver)
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         with pytest.raises(
             ValueError,
             match="No voice profile configured",
@@ -390,7 +382,7 @@ def test_android_speech_engine_propagates_subprocess_failure():
     )
 
     with patch(
-        "subprocess.run",
+        "subprocess.Popen",
         side_effect=RuntimeError("tts failure"),
     ) as run:
         with pytest.raises(
@@ -421,7 +413,7 @@ def test_android_speech_engine_uses_configured_pitch_when_explicitly_requested()
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     run.assert_called_once_with(
@@ -433,7 +425,6 @@ def test_android_speech_engine_uses_configured_pitch_when_explicitly_requested()
             "1.0",
             "Configured pitch.",
         ],
-        check=True,
     )
 
 
@@ -448,7 +439,7 @@ def test_android_speech_engine_preserves_request_text_exactly():
         speed=1.0,
     )
 
-    with patch("subprocess.run") as run:
+    with patch("subprocess.Popen") as run:
         engine.speak(request)
 
     command = run.call_args.args[0]

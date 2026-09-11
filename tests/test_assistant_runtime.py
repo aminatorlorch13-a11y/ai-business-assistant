@@ -39,7 +39,7 @@ def make_business(
         business_id=business_id,
         name="Runtime Business",
         owner_name="Test Owner",
-        assistant_name="Amina",
+        assistant_name="Configured Test Assistant",
         assistant_voice=assistant_voice,
     )
 
@@ -115,7 +115,7 @@ class RecordingBusinessOperation(BusinessOperation):
 
         self.actions.append(action)
 
-        return "Hello from Amina."
+        return "Hello from Configured Test Assistant."
 
 
 class RecordingSpeechInputEngine(SpeechInputEngine):
@@ -146,6 +146,9 @@ class RecordingSpeechEngine(SpeechEngine):
             )
 
         self.requests.append(request)
+
+    def cancel_current(self) -> None:
+        return None
 
 
 class StopAfterTurnsSpeechEngine(SpeechEngine):
@@ -192,6 +195,9 @@ class StopAfterTurnsSpeechEngine(SpeechEngine):
 
         if len(self.requests) >= self._turns:
             self._session.stop()
+
+    def cancel_current(self) -> None:
+        return None
 
 
 class InvalidSpeechInputEngine(SpeechInputEngine):
@@ -347,7 +353,7 @@ def test_runtime_text_enters_normal_assistant_pipeline() -> None:
     assert isinstance(response, AssistantResponse)
     assert response.business_id == business.business_id
     assert response.assistant_name == business.assistant_name
-    assert response.message == "Hello from Amina."
+    assert response.message == "Hello from Configured Test Assistant."
 
     assert len(provider.messages) == 1
     assert provider.messages[0].business_id == business.business_id
@@ -394,7 +400,7 @@ def test_runtime_voice_turn_enters_same_assistant_pipeline() -> None:
 
     assert isinstance(response, AssistantResponse)
     assert response.business_id == business.business_id
-    assert response.message == "Hello from Amina."
+    assert response.message == "Hello from Configured Test Assistant."
 
     assert speech_input.calls == 1
     assert len(provider.messages) == 1
@@ -484,7 +490,7 @@ def test_runtime_speaks_response_through_voice_boundary() -> None:
     response = AssistantResponse(
         business_id=runtime.business.business_id,
         assistant_name=runtime.business.assistant_name,
-        message="Hello from Amina.",
+        message="Hello from Configured Test Assistant.",
         should_speak=True,
     )
 
@@ -494,7 +500,7 @@ def test_runtime_speaks_response_through_voice_boundary() -> None:
 
     request = speech_engine.requests[0]
 
-    assert request.text == "Hello from Amina."
+    assert request.text == "Hello from Configured Test Assistant."
     assert request.voice == "female"
     assert request.speed == 1.0
 
@@ -504,7 +510,7 @@ def test_runtime_rejects_response_for_different_business() -> None:
 
     response = AssistantResponse(
         business_id="different-business",
-        assistant_name="Amina",
+        assistant_name="Configured Test Assistant",
         message="Cross-business response.",
         should_speak=True,
     )

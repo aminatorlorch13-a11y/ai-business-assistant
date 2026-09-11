@@ -81,6 +81,9 @@ class RecordingSpeechEngine(SpeechEngine):
     def speak(self, request):
         self.requests.append(request)
 
+    def cancel_current(self):
+        return None
+
 
 class InvalidSpeechInputEngine(SpeechInputEngine):
     def listen(self):
@@ -105,7 +108,7 @@ def make_business(business_id="business-123"):
         business_id=business_id,
         name="Test Business",
         owner_name="Test Owner",
-        assistant_name="Amina",
+        assistant_name="Configured Test Assistant",
         assistant_voice="female",
     )
 
@@ -186,7 +189,7 @@ def test_capture_voice_input_returns_voice_conversation_input():
 
 def test_process_input_uses_trusted_business_boundary():
     coordinator, provider, _, _ = make_coordinator(
-        response_text="Hello from Amina.",
+        response_text="Hello from Configured Test Assistant.",
     )
 
     conversation_input = ConversationInput(
@@ -198,7 +201,7 @@ def test_process_input_uses_trusted_business_boundary():
 
     assert isinstance(response, AssistantResponse)
     assert response.business_id == "business-123"
-    assert response.message == "Hello from Amina."
+    assert response.message == "Hello from Configured Test Assistant."
 
     assert len(provider.messages) == 1
     assert provider.messages[0].business_id == "business-123"
@@ -465,13 +468,13 @@ def test_run_preserves_state_after_successful_turn():
     coordinator, provider, speech_input_engine, _ = make_coordinator(
         speech_inputs=["Hello assistant."],
         session=session,
-        response_text="Hello from Amina.",
+        response_text="Hello from Configured Test Assistant.",
         speech_engine=speech_engine,
     )
 
     coordinator.run()
 
     assert provider.messages[0].content == "Hello assistant."
-    assert speech_engine.requests[0].text == "Hello from Amina."
+    assert speech_engine.requests[0].text == "Hello from Configured Test Assistant."
     assert speech_input_engine.calls == 1
     assert coordinator.session.state is ConversationState.ENDED
