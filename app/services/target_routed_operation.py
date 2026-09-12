@@ -1,16 +1,16 @@
 from collections.abc import Mapping
 
 from app.assistant.action import AssistantAction
+from app.identity.tenant import TenantContext
 from app.services.business_operation import BusinessOperation
 
 
 class TargetRoutedOperation(BusinessOperation):
     """
-    Dispatches an action to the correct BusinessOperation by target.
+    Dispatch an action to the correct BusinessOperation by target.
 
-    ActionExecutor is constructed with exactly one operation. This
-    router lets that single operation represent many real handlers
-    without changing ActionExecutor's contract.
+    ActionExecutor remains the single execution boundary. This router only
+    selects the concrete operation and forwards the authenticated tenant.
     """
 
     def __init__(
@@ -28,7 +28,6 @@ class TargetRoutedOperation(BusinessOperation):
                     "operations_by_target keys must be "
                     "non-empty strings."
                 )
-
             if not isinstance(operation, BusinessOperation):
                 raise TypeError(
                     "operations_by_target values must be "
@@ -42,14 +41,22 @@ class TargetRoutedOperation(BusinessOperation):
 
         self._operations_by_target = dict(operations_by_target)
 
-    def execute(self, action: AssistantAction) -> str:
-        """Route the action to its registered handler and execute it."""
+    def execute(
+        self,
+        action: AssistantAction,
+        tenant: TenantContext | None = None,
+    ) -> str:
+        """Route the action and preserve the execution tenant."""
 
         operation = self._operations_by_target.get(action.target)
 
         if operation is None:
             raise ValueError(
-                f"No operation registered for target: {action.target!r}."
+                f"No operation registered for target: "
+                f"{action.target!r}."
             )
 
-        return operation.execute(action)
+        if tenant is None:
+            return operation.execute(action)
+
+        return operation.execute(action, tenant=tenant)

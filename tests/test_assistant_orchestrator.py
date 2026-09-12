@@ -64,7 +64,8 @@ def test_orchestrator_executes_interpreted_action():
 
     processor.process.assert_called_once_with(message)
     executor.execute.assert_called_once_with(
-        make_interpretation().action
+        make_interpretation().action,
+        tenant=None,
     )
 
 
@@ -127,5 +128,146 @@ def test_orchestrator_does_not_return_success_when_execution_fails():
 
     processor.process.assert_called_once_with(message)
     executor.execute.assert_called_once_with(
-        make_interpretation().action
+        make_interpretation().action,
+        tenant=None,
+    )
+
+
+def make_tenant(
+    business_id: str = "business-001",
+) -> "TenantContext":
+    from app.identity.models import AuthenticatedPrincipal, UserRole
+    from app.identity.tenant import TenantContext
+
+    principal = AuthenticatedPrincipal(
+        user_id="user-001",
+        business_id=business_id,
+        role=UserRole.OWNER,
+        session_id="session-001",
+    )
+    return TenantContext(
+        business_id=business_id,
+        principal=principal,
+    )
+
+
+def test_orchestrator_forwards_authenticated_tenant_to_executor():
+    processor = Mock()
+    executor = Mock()
+
+    interpretation = make_interpretation()
+    processor.process.return_value = interpretation
+    executor.execute.return_value = "Appointment creation requested."
+
+    orchestrator = AssistantOrchestrator(
+        business=make_business(),
+        processor=processor,
+        executor=executor,
+    )
+
+    message = AssistantMessage(
+        business_id="business-001",
+        content="Please create an appointment.",
+    )
+    tenant = make_tenant()
+
+    result = orchestrator.handle(
+        message,
+        tenant=tenant,
+    )
+
+    assert result == AssistantResponse(
+        business_id="business-001",
+        assistant_name="Business Assistant",
+        message="Appointment creation requested.",
+    )
+
+    executor.execute.assert_called_once_with(
+        interpretation.action,
+        tenant=tenant,
+    )
+
+
+def test_orchestrator_rejects_wrong_execution_tenant_before_processing():
+    processor = Mock()
+    executor = Mock()
+
+    orchestrator = AssistantOrchestrator(
+        business=make_business(),
+        processor=processor,
+        executor=executor,
+    )
+
+    message = AssistantMessage(
+        business_id="business-001",
+        content="Please create an appointment.",
+    )
+    wrong_tenant = make_tenant("business-999")
+
+    with pytest.raises(
+        ValueError,
+        match="Execution tenant does not belong to this message business",
+    ):
+        orchestrator.handle(
+            message,
+            tenant=wrong_tenant,
+        )
+
+    processor.process.assert_not_called()
+    executor.execute.assert_not_called()
+
+
+def test_orchestrator_rejects_invalid_tenant_before_processing():
+    processor = Mock()
+    executor = Mock()
+
+    orchestrator = AssistantOrchestrator(
+        business=make_business(),
+        processor=processor,
+        executor=executor,
+    )
+
+    message = AssistantMessage(
+        business_id="business-001",
+        content="Please create an appointment.",
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="tenant must be a TenantContext or None",
+    ):
+        orchestrator.handle(
+            message,
+            tenant=object(),
+        )
+
+    processor.process.assert_not_called()
+    executor.execute.assert_not_called()
+
+
+def test_orchestrator_preserves_existing_web_execution_without_tenant():
+    processor = Mock()
+    executor = Mock()
+
+    processor.process.return_value = make_interpretation()
+    executor.execute.return_value = "Appointment creation requested."
+
+    orchestrator = AssistantOrchestrator(
+        business=make_business(),
+        processor=processor,
+        executor=executor,
+    )
+
+    message = AssistantMessage(
+        business_id="business-001",
+        content="Please create an appointment.",
+    )
+
+    result = orchestrator.handle(message)
+
+    assert result.message == "Appointment creation requested."
+
+    executor.execute.assert_called_once_with(
+        make_interpretation().action,
+        tenant=None,
     )

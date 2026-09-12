@@ -24,10 +24,14 @@ def make_action(
 class RecordingOperation(BusinessOperation):
     def __init__(self) -> None:
         self.calls = []
+        self.last_tenant = None
 
-    def execute(self, action: AssistantAction) -> str:
+    def execute(self, action: AssistantAction, tenant=None) -> str:
         self.calls.append(action)
-        return f"handled:{action.target}"
+        self.last_tenant = tenant
+        if tenant is None:
+            return f"handled:{action.target}"
+        return "executed"
 
 
 def test_assistant_operation_accepts_only_assistant_target():
@@ -178,3 +182,35 @@ def test_target_router_rejects_whitespace_only_registration_key():
                 "   ": operation,
             }
         )
+
+
+def test_target_router_forwards_authenticated_tenant():
+    from app.identity.models import AuthenticatedPrincipal, UserRole
+    from app.identity.tenant import TenantContext
+
+    operation = RecordingOperation()
+    router = TargetRoutedOperation({"appointment": operation})
+
+    principal = AuthenticatedPrincipal(
+        user_id="user-001",
+        business_id="business-001",
+        role=UserRole.OWNER,
+        session_id="session-001",
+    )
+    tenant = TenantContext(
+        business_id="business-001",
+        principal=principal,
+    )
+
+    action = AssistantAction(
+        business_id="business-001",
+        action_type="none",
+        target="appointment",
+        instruction="Test tenant propagation.",
+        reversible=False,
+    )
+
+    result = router.execute(action, tenant=tenant)
+
+    assert result == "executed"
+    assert operation.last_tenant is tenant

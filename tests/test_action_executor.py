@@ -178,3 +178,70 @@ def test_executor_rejects_empty_operation_result():
 
     with pytest.raises(ValueError, match="empty result"):
         executor.execute(make_action("none"))
+
+
+def test_executor_rejects_action_for_wrong_tenant():
+    from app.identity.models import AuthenticatedPrincipal, UserRole
+    from app.identity.tenant import TenantContext
+
+    operation = Mock(spec=BusinessOperation)
+    executor = ActionExecutor(
+        policy=ActionPolicy(),
+        operation=operation,
+    )
+
+    principal = AuthenticatedPrincipal(
+        user_id="user-001",
+        business_id="business-001",
+        role=UserRole.OWNER,
+        session_id="session-001",
+    )
+    tenant = TenantContext(
+        business_id="business-001",
+        principal=principal,
+    )
+
+    action = make_action("none")
+    action = AssistantAction(
+        business_id="business-002",
+        action_type=action.action_type,
+        target=action.target,
+        instruction=action.instruction,
+        reversible=action.reversible,
+    )
+
+    with pytest.raises(PermissionError, match="execution tenant"):
+        executor.execute(action, tenant=tenant)
+
+    operation.execute.assert_not_called()
+
+
+def test_executor_forwards_authenticated_tenant_to_operation():
+    from app.identity.models import AuthenticatedPrincipal, UserRole
+    from app.identity.tenant import TenantContext
+
+    operation = Mock(spec=BusinessOperation)
+    operation.execute.return_value = "executed"
+
+    executor = ActionExecutor(
+        policy=ActionPolicy(),
+        operation=operation,
+    )
+
+    principal = AuthenticatedPrincipal(
+        user_id="user-001",
+        business_id="business-001",
+        role=UserRole.OWNER,
+        session_id="session-001",
+    )
+    tenant = TenantContext(
+        business_id="business-001",
+        principal=principal,
+    )
+
+    action = make_action("none")
+
+    result = executor.execute(action, tenant=tenant)
+
+    assert result == "executed"
+    operation.execute.assert_called_once_with(action, tenant=tenant)

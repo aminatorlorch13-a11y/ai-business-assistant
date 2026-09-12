@@ -3,6 +3,7 @@ from app.assistant.processor import AssistantProcessor
 from app.assistant.response import AssistantResponse
 from app.automation.context import AutomationContext
 from app.assistant.action_executor import ActionExecutor
+from app.identity.tenant import TenantContext
 from app.models.business import Business
 
 
@@ -24,6 +25,7 @@ class AssistantOrchestrator:
         message: AssistantMessage,
         confirmed: bool = False,
         automation_context: AutomationContext | None = None,
+        tenant: TenantContext | None = None,
     ) -> AssistantResponse:
         """Process a message and execute its interpreted action."""
 
@@ -44,6 +46,16 @@ class AssistantOrchestrator:
         ):
             raise ValueError(
                 "Automation context does not belong to this message business."
+            )
+
+        if tenant is not None and not isinstance(tenant, TenantContext):
+            raise TypeError(
+                "tenant must be a TenantContext or None."
+            )
+
+        if tenant is not None and tenant.business_id != message.business_id:
+            raise ValueError(
+                "Execution tenant does not belong to this message business."
             )
 
         if automation_context is None:
@@ -68,10 +80,12 @@ class AssistantOrchestrator:
             result = self._executor.execute(
                 interpretation.action,
                 confirmed=True,
+                tenant=tenant,
             )
         else:
             result = self._executor.execute(
                 interpretation.action,
+                tenant=tenant,
             )
 
         return AssistantResponse(
