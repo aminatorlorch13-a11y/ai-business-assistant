@@ -8,7 +8,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from .intent import AssistantIntent
 from threading import RLock
+
+
+@dataclass(frozen=True)
+class ClarificationContext:
+    """Immutable context for an unresolved assistant intent."""
+
+    pending_intent: AssistantIntent
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.pending_intent, AssistantIntent):
+            raise TypeError("pending_intent must be an AssistantIntent.")
 
 
 class VoiceSessionState(str, Enum):
@@ -18,6 +30,7 @@ class VoiceSessionState(str, Enum):
     LISTENING = "listening"
     PROCESSING = "processing"
     SPEAKING = "speaking"
+    CLARIFYING = "clarifying"
     SLEEPING = "sleeping"
 
 
@@ -27,6 +40,8 @@ class VoiceSessionEvent(str, Enum):
     START_LISTENING = "start_listening"
     START_PROCESSING = "start_processing"
     START_SPEAKING = "start_speaking"
+    START_CLARIFYING = "start_clarifying"
+    RESOLVE_CLARIFICATION = "resolve_clarification"
     FINISH_SPEAKING = "finish_speaking"
     STOP = "stop"
     SLEEP = "sleep"
@@ -43,6 +58,7 @@ class VoiceStateTransition:
     revision: int
     operation_token: int | None = None
     interrupted: bool = False
+    clarification: ClarificationContext | None = None
 
 
 class VoiceStateError(RuntimeError):
@@ -51,6 +67,10 @@ class VoiceStateError(RuntimeError):
 
 class StaleVoiceOperationError(VoiceStateError):
     """Raised when an old asynchronous operation tries to complete."""
+
+
+class StaleVoiceClarificationError(VoiceStateError):
+    """Raised when an old clarification response tries to resolve."""
 
 
 class VoiceSessionStateMachine:
@@ -75,6 +95,7 @@ class VoiceSessionStateMachine:
         self._revision = 0
         self._next_operation_token = 0
         self._active_operation_token: int | None = None
+        self._clarification: ClarificationContext | None = None
         self._lock = RLock()
 
     @property
@@ -86,6 +107,11 @@ class VoiceSessionStateMachine:
     def revision(self) -> int:
         with self._lock:
             return self._revision
+
+    @property
+    def clarification(self) -> ClarificationContext | None:
+        with self._lock:
+            return self._clarification
 
     @property
     def active_operation_token(self) -> int | None:
@@ -107,6 +133,70 @@ class VoiceSessionStateMachine:
                 VoiceSessionEvent.START_PROCESSING,
                 VoiceSessionState.PROCESSING,
                 operation_token=token,
+            )
+
+    def start_clarifying(
+        self, intent: AssistantIntent
+    ) -> VoiceStateTransition:
+        if not isinstance(intent, AssistantIntent):
+            raise TypeError('intent must be an AssistantIntent.')
+
+        with self._lock:
+            allowed = {
+                VoiceSessionState.LISTENING,
+                VoiceSessionState.PROCESSING,
+                VoiceSessionState.CLARIFYING,
+            }
+
+            if self._state not in allowed:
+                self._raise_invalid(
+                    VoiceSessionEvent.START_CLARIFYING,
+                    allowed,
+                )
+
+            self._active_operation_token = None
+
+            clarification = ClarificationContext(
+                pending_intent=intent,
+            )
+
+            return self._commit(
+                VoiceSessionEvent.START_CLARIFYING,
+                VoiceSessionState.CLARIFYING,
+                clarification=clarification,
+            )
+
+    def resolve_clarification(
+        self,
+        clarification_revision: int,
+    ) -> VoiceStateTransition:
+        """Resolve the current clarification if its revision is still current.
+
+        The revision acts as the stale-response guard. A response belonging to
+        an older clarification cannot resolve a newer clarification.
+        """
+        if (
+            not isinstance(clarification_revision, int)
+            or isinstance(clarification_revision, bool)
+        ):
+            raise TypeError("clarification_revision must be an integer.")
+
+        with self._lock:
+            self._require_state(VoiceSessionState.CLARIFYING)
+
+            if self._clarification is None:
+                raise VoiceStateError(
+                    "Cannot resolve clarification without an active clarification."
+                )
+
+            if clarification_revision != self._revision:
+                raise StaleVoiceClarificationError(
+                    "Clarification response is stale."
+                )
+
+            return self._commit(
+                VoiceSessionEvent.RESOLVE_CLARIFICATION,
+                VoiceSessionState.LISTENING,
             )
 
     def start_speaking(self, operation_token: int | None = None) -> VoiceStateTransition:
@@ -204,9 +294,11 @@ class VoiceSessionStateMachine:
         *,
         operation_token: int | None = None,
         interrupted: bool = False,
+        clarification: ClarificationContext | None = None,
     ) -> VoiceStateTransition:
         previous = self._state
         self._state = target
+        self._clarification = clarification
         self._revision += 1
         return VoiceStateTransition(
             previous=previous,
@@ -215,6 +307,7 @@ class VoiceSessionStateMachine:
             revision=self._revision,
             operation_token=operation_token,
             interrupted=interrupted,
+            clarification=clarification,
         )
 
     def _new_operation_token(self) -> int:

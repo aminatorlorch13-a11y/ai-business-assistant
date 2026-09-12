@@ -2,13 +2,23 @@ import threading
 
 import pytest
 
+from app.assistant.intent import AssistantIntent
 from app.assistant.voice_state import (
+    StaleVoiceClarificationError,
     StaleVoiceOperationError,
     VoiceSessionEvent,
     VoiceSessionState,
     VoiceSessionStateMachine,
     VoiceStateError,
 )
+
+
+def make_test_intent() -> AssistantIntent:
+    return AssistantIntent(
+        business_id="test-business",
+        intent_type="business_task",
+        instruction="test instruction",
+    )
 
 
 def test_initial_state_is_idle():
@@ -25,6 +35,82 @@ def test_normal_voice_cycle_is_listening_processing_speaking_listening():
     speaking = machine.start_speaking(processing.operation_token)
     finished = machine.finish_speaking(speaking.operation_token)
     assert finished.current is VoiceSessionState.LISTENING
+
+
+def test_clarifying_stores_pending_intent():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+
+    transition = machine.start_clarifying(make_test_intent())
+
+    assert transition.current is VoiceSessionState.CLARIFYING
+    assert transition.clarification is not None
+    assert transition.clarification.pending_intent.business_id == "test-business"
+    assert transition.clarification.pending_intent.intent_type == "business_task"
+    assert transition.clarification.pending_intent.instruction == "test instruction"
+    assert machine.clarification is transition.clarification
+
+
+def test_clarifying_replaces_existing_clarification():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+
+    first = machine.start_clarifying(make_test_intent())
+    second = machine.start_clarifying(AssistantIntent("test-business", "customer_request", "second instruction"))
+
+    assert second.current is VoiceSessionState.CLARIFYING
+    assert second.clarification is not first.clarification
+    assert second.clarification.pending_intent.intent_type == "customer_request"
+    assert machine.clarification is second.clarification
+
+
+def test_clarifying_invalidates_processing_operation():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+
+    processing = machine.start_processing()
+    clarification = machine.start_clarifying(make_test_intent())
+
+    assert clarification.current is VoiceSessionState.CLARIFYING
+    assert machine.active_operation_token is None
+
+    with pytest.raises(StaleVoiceOperationError):
+        machine.require_operation_current(processing.operation_token)
+
+
+def test_stop_clears_clarification():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+    machine.start_clarifying(make_test_intent())
+
+    transition = machine.stop()
+
+    assert transition.current is VoiceSessionState.LISTENING
+    assert machine.clarification is None
+
+
+def test_sleep_clears_clarification():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+    machine.start_clarifying(make_test_intent())
+
+    transition = machine.sleep()
+
+    assert transition.current is VoiceSessionState.SLEEPING
+    assert machine.clarification is None
+
+
+def test_stop_from_clarifying_returns_to_listening_and_clears_clarification():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+    machine.start_clarifying(make_test_intent())
+
+    transition = machine.stop()
+
+    assert transition.previous is VoiceSessionState.CLARIFYING
+    assert transition.current is VoiceSessionState.LISTENING
+    assert transition.interrupted is False
+    assert machine.clarification is None
 
 
 def test_stop_during_processing_returns_to_listening_and_interrupts():
@@ -243,6 +329,162 @@ def test_concurrent_start_and_stop_never_exposes_processing_without_a_current_to
         assert machine.active_operation_token is not None
     else:
         assert machine.active_operation_token is None
+
+
+
+
+def test_clarification_resolution_returns_to_listening_and_clears_context():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+
+    clarification = machine.start_clarifying(make_test_intent())
+
+    resolved = machine.resolve_clarification(clarification.revision)
+
+    assert resolved.event is VoiceSessionEvent.RESOLVE_CLARIFICATION
+    assert resolved.previous is VoiceSessionState.CLARIFYING
+    assert resolved.current is VoiceSessionState.LISTENING
+    assert resolved.clarification is None
+    assert machine.clarification is None
+    assert machine.active_operation_token is None
+
+
+def test_stale_clarification_revision_cannot_resolve_current_clarification():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+
+    first = machine.start_clarifying(make_test_intent())
+    second = machine.start_clarifying(
+        AssistantIntent(
+            "test-business",
+            "customer_request",
+            "replacement instruction",
+        )
+    )
+
+    with pytest.raises(StaleVoiceClarificationError):
+        machine.resolve_clarification(first.revision)
+
+    assert machine.state is VoiceSessionState.CLARIFYING
+    assert machine.clarification is second.clarification
+    assert machine.revision == second.revision
+
+
+def test_duplicate_clarification_resolution_is_rejected():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+
+    clarification = machine.start_clarifying(make_test_intent())
+    machine.resolve_clarification(clarification.revision)
+
+    with pytest.raises(VoiceStateError):
+        machine.resolve_clarification(clarification.revision)
+
+    assert machine.state is VoiceSessionState.LISTENING
+    assert machine.clarification is None
+
+
+def test_clarification_resolution_rejects_invalid_revision_types():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+    machine.start_clarifying(make_test_intent())
+
+    with pytest.raises(TypeError):
+        machine.resolve_clarification(True)
+
+    with pytest.raises(TypeError):
+        machine.resolve_clarification("1")
+
+    with pytest.raises(TypeError):
+        machine.resolve_clarification(None)
+
+
+def test_clarification_revision_changes_when_clarification_is_replaced():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+
+    first = machine.start_clarifying(make_test_intent())
+    second = machine.start_clarifying(
+        AssistantIntent(
+            "test-business",
+            "customer_request",
+            "second instruction",
+        )
+    )
+
+    assert second.revision > first.revision
+
+    with pytest.raises(StaleVoiceClarificationError):
+        machine.resolve_clarification(first.revision)
+
+    resolved = machine.resolve_clarification(second.revision)
+
+    assert resolved.current is VoiceSessionState.LISTENING
+    assert machine.clarification is None
+
+
+def test_concurrent_clarification_resolution_is_serialized_without_corruption():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+
+    clarification = machine.start_clarifying(make_test_intent())
+    revision = clarification.revision
+
+    transitions = []
+    errors = []
+    lock = threading.Lock()
+
+    def resolve_worker():
+        try:
+            result = machine.resolve_clarification(revision)
+            with lock:
+                transitions.append(result)
+        except VoiceStateError as exc:
+            with lock:
+                errors.append(exc)
+        except Exception as exc:  # pragma: no cover
+            with lock:
+                errors.append(exc)
+
+    threads = [
+        threading.Thread(target=resolve_worker)
+        for _ in range(50)
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join(timeout=2)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert len(transitions) == 1
+    assert len(errors) == 49
+    assert machine.state is VoiceSessionState.LISTENING
+    assert machine.clarification is None
+    assert machine.active_operation_token is None
+
+
+def test_stale_clarification_cannot_resurrect_after_stop_and_new_clarification():
+    machine = VoiceSessionStateMachine()
+    machine.start_listening()
+
+    old = machine.start_clarifying(make_test_intent())
+    machine.stop()
+
+    new = machine.start_clarifying(
+        AssistantIntent(
+            "test-business",
+            "customer_request",
+            "new instruction",
+        )
+    )
+
+    with pytest.raises(StaleVoiceClarificationError):
+        machine.resolve_clarification(old.revision)
+
+    assert machine.state is VoiceSessionState.CLARIFYING
+    assert machine.clarification is new.clarification
 
 
 def test_stale_completion_attack_after_many_stop_restart_cycles():

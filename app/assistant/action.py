@@ -19,6 +19,7 @@ class AssistantAction:
     action_type: str
     target: str
     instruction: str
+    reversible: bool = False
 
     def __post_init__(self) -> None:
         self._validate_string(
@@ -43,6 +44,9 @@ class AssistantAction:
                 "action_type must be one of: "
                 f"{', '.join(sorted(SUPPORTED_ACTIONS))}."
             )
+
+        if not isinstance(self.reversible, bool):
+            raise TypeError("reversible must be a boolean.")
 
     @staticmethod
     def _validate_string(
