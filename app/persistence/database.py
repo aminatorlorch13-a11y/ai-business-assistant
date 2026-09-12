@@ -3,19 +3,13 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
-from typing import Iterator
+from typing import Callable, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class SQLiteDatabase:
-    """Durable SQLite infrastructure boundary.
-
-    Application code depends on repository/transaction contracts rather than
-    SQLite directly. SQLite is the first concrete durable adapter because it
-    is provided by Python's standard library; a future PostgreSQL adapter can
-    replace this layer without changing domain contracts.
-    """
+    """Durable SQLite infrastructure with explicit tracked migrations."""
 
     def __init__(self, path: str | Path) -> None:
         if not isinstance(path, (str, Path)):
@@ -31,19 +25,46 @@ class SQLiteDatabase:
     def initialize(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
-            connection.executescript(SCHEMA)
+            connection.executescript(BASE_SCHEMA)
             row = connection.execute(
                 "SELECT value FROM persistence_metadata WHERE key = 'schema_version'"
             ).fetchone()
+
             if row is None:
                 connection.execute(
-                    "INSERT INTO persistence_metadata(key, value) VALUES('schema_version', ?)",
-                    (str(SCHEMA_VERSION),),
+                    "INSERT INTO persistence_metadata(key, value) VALUES('schema_version', '1')"
                 )
-            elif int(row[0]) != SCHEMA_VERSION:
+                current_version = 1
+            else:
+                try:
+                    current_version = int(row[0])
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError("Invalid persistence schema version.") from exc
+
+            if current_version > SCHEMA_VERSION:
                 raise RuntimeError(
-                    f"Unsupported persistence schema version: {row[0]}"
+                    f"Unsupported persistence schema version: {current_version}"
                 )
+
+            while current_version < SCHEMA_VERSION:
+                migration = MIGRATIONS.get(current_version)
+                if migration is None:
+                    raise RuntimeError(
+                        f"No migration registered from schema version {current_version}."
+                    )
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    migration(connection)
+                    current_version += 1
+                    connection.execute(
+                        "UPDATE persistence_metadata SET value = ? WHERE key = 'schema_version'",
+                        (str(current_version),),
+                    )
+                except Exception:
+                    connection.rollback()
+                    raise
+                else:
+                    connection.commit()
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
@@ -75,7 +96,7 @@ class SQLiteDatabase:
                 connection.commit()
 
 
-SCHEMA = """
+BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS persistence_metadata (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -168,3 +189,39 @@ CREATE TABLE IF NOT EXISTS launch_program (
 INSERT OR IGNORE INTO launch_program(singleton_id, target_businesses, paid_businesses)
 VALUES(1, 10, 0);
 """
+
+
+def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS credentials (
+            user_id TEXT PRIMARY KEY,
+            credential_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_throttle_state (
+            throttle_key_hash TEXT PRIMARY KEY,
+            failures INTEGER NOT NULL CHECK(failures >= 0),
+            first_failure_at TEXT NOT NULL,
+            blocked_until TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auth_throttle_blocked_until ON auth_throttle_state(blocked_until)"
+    )
+
+
+MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    1: _migrate_v1_to_v2,
+}
+
+# Backwards-compatible name for callers that imported SCHEMA.
+SCHEMA = BASE_SCHEMA

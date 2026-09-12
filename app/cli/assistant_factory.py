@@ -137,3 +137,30 @@ def prompt_for_assistant_identity() -> tuple[str, str]:
         print(f"Please choose one of: {', '.join(SUPPORTED_VOICES)}")
 
     return assistant_name, assistant_voice
+
+
+def build_orchestrator_for_business(business: Business) -> tuple[Business, AssistantOrchestrator]:
+    """Build an orchestrator from a persisted business configuration."""
+    if not isinstance(business, Business):
+        raise TypeError("business must be a Business.")
+    return _build_orchestrator(business)
+
+
+def _build_orchestrator(business: Business) -> tuple[Business, AssistantOrchestrator]:
+    ai_provider = build_ai_provider()
+    processor = AssistantProcessor(
+        ai_provider=ai_provider,
+        validator=AIInterpretationValidator(),
+    )
+    operation = TargetRoutedOperation(
+        operations_by_target={
+            "assistant": AssistantConversationOperation(),
+            "appointment": AppointmentOperation(),
+        }
+    )
+    executor = ActionExecutor(policy=ActionPolicy(), operation=operation)
+    return business, AssistantOrchestrator(
+        business=business,
+        processor=processor,
+        executor=executor,
+    )

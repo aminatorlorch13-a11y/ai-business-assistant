@@ -17,9 +17,11 @@ class SQLiteMembershipRepository:
             raise TypeError("membership must be a BusinessMembership.")
         with self._database.connection() as connection:
             connection.execute(
-                """INSERT INTO business_memberships(user_id, business_id, role)
-                   VALUES (?, ?, ?)
-                   ON CONFLICT(user_id, business_id) DO UPDATE SET role=excluded.role""",
+                """
+                INSERT INTO business_memberships(user_id, business_id, role)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, business_id) DO UPDATE SET role=excluded.role
+                """,
                 (membership.user_id, membership.business_id, membership.role.value),
             )
         return membership
@@ -35,6 +37,15 @@ class SQLiteMembershipRepository:
         if row is None:
             return None
         return BusinessMembership(row["user_id"], row["business_id"], UserRole(row["role"]))
+
+    def list_for_user(self, user_id: str) -> list[BusinessMembership]:
+        _validate_id(user_id)
+        with self._database.connection() as connection:
+            rows = connection.execute(
+                "SELECT user_id, business_id, role FROM business_memberships WHERE user_id = ? ORDER BY business_id",
+                (user_id,),
+            ).fetchall()
+        return [BusinessMembership(r["user_id"], r["business_id"], UserRole(r["role"])) for r in rows]
 
     def list_for_business(self, business_id: str) -> list[BusinessMembership]:
         _validate_id(business_id)
