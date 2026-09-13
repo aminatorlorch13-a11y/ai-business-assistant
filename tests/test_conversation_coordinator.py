@@ -14,7 +14,35 @@ from app.models.voice import VoiceConfiguration
 from app.services.business_operation import BusinessOperation
 from app.trust.action_policy import ActionPolicy
 from app.voice.conversation import ConversationState
-from app.voice.conversation_coordinator import AssistantConversationCoordinator
+from app.voice.conversation_coordinator import (
+    AssistantConversationCoordinator as _ProductionAssistantConversationCoordinator,
+)
+from tests.runtime_support import make_runtime_dependencies
+
+
+class AssistantConversationCoordinator(_ProductionAssistantConversationCoordinator):
+    """Test adapter that supplies real runtime dependencies to the production coordinator."""
+
+    def __init__(self, *args, **kwargs):
+        business = kwargs.get("business")
+        if business is None and args:
+            business = args[0]
+
+        if business is None:
+            raise AssertionError(
+                "Test coordinator construction requires a business."
+            )
+
+        self._runtime_dependencies = make_runtime_dependencies(business.business_id)
+        commercial_access = self._runtime_dependencies.commercial_access
+        tenant = self._runtime_dependencies.tenant
+
+        kwargs.setdefault("commercial_access", commercial_access)
+        kwargs.setdefault("tenant", tenant)
+
+        super().__init__(*args, **kwargs)
+
+
 from app.voice.engine import SpeechEngine
 from app.voice.input import ConversationInput, ConversationInputSource
 from app.voice.input_engine import SpeechInputEngine
@@ -55,7 +83,7 @@ class RecordingBusinessOperation(BusinessOperation):
     def __init__(self):
         self.actions = []
 
-    def execute(self, action):
+    def execute(self, action, tenant=None):
         self.actions.append(action)
         return action.instruction
 

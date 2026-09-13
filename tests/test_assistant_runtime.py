@@ -19,8 +19,34 @@ from app.services.business_operation import BusinessOperation
 from app.trust.action_policy import ActionPolicy
 from app.voice.conversation import ConversationState
 from app.voice.conversation_coordinator import (
-    AssistantConversationCoordinator,
+    AssistantConversationCoordinator as _ProductionAssistantConversationCoordinator,
 )
+from tests.runtime_support import make_runtime_dependencies
+
+
+class AssistantConversationCoordinator(_ProductionAssistantConversationCoordinator):
+    """Test adapter that supplies real runtime dependencies to the production coordinator."""
+
+    def __init__(self, *args, **kwargs):
+        business = kwargs.get("business")
+        if business is None and args:
+            business = args[0]
+
+        if business is None:
+            raise AssertionError(
+                "Test coordinator construction requires a business."
+            )
+
+        self._runtime_dependencies = make_runtime_dependencies(business.business_id)
+        commercial_access = self._runtime_dependencies.commercial_access
+        tenant = self._runtime_dependencies.tenant
+
+        kwargs.setdefault("commercial_access", commercial_access)
+        kwargs.setdefault("tenant", tenant)
+
+        super().__init__(*args, **kwargs)
+
+
 from app.voice.engine import SpeechEngine
 from app.voice.input import ConversationInputSource
 from app.voice.input_engine import SpeechInputEngine
@@ -28,6 +54,7 @@ from app.voice.message_adapter import ConversationMessageAdapter
 from app.voice.request import SpeechRequest
 from app.voice.service import VoiceService
 from app.voice.session import ConversationSession
+from tests.runtime_support import make_runtime_dependencies
 from app.voice.speech_input import SpeechInput
 
 
@@ -97,7 +124,11 @@ class RecordingBusinessOperation(BusinessOperation):
     def __init__(self) -> None:
         self.actions: list[AssistantAction] = []
 
-    def execute(self, action: AssistantAction) -> str:
+    def execute(
+        self,
+        action: AssistantAction,
+        tenant: TenantContext | None = None,
+    ) -> str:
         if not isinstance(action, AssistantAction):
             raise TypeError(
                 "action must be an AssistantAction."
@@ -259,6 +290,10 @@ def make_runtime(
         provider=provider,
     )
 
+    runtime_dependencies = make_runtime_dependencies(business.business_id)
+    commercial_access = runtime_dependencies.commercial_access
+    tenant = runtime_dependencies.tenant
+
     coordinator = AssistantConversationCoordinator(
         business=business,
         orchestrator=orchestrator,
@@ -270,13 +305,20 @@ def make_runtime(
         ),
         message_adapter=ConversationMessageAdapter(),
         session=session,
+        commercial_access=commercial_access,
+        tenant=tenant,
     )
 
-    return AssistantRuntime(
+    runtime = AssistantRuntime(
         business=business,
         orchestrator=orchestrator,
         conversation_coordinator=coordinator,
     )
+
+    # Keep the temporary SQLite directory alive for the runtime's lifetime.
+    runtime._runtime_test_dependencies = runtime_dependencies
+
+    return runtime
 
 
 def test_runtime_factory_returns_runtime() -> None:
@@ -287,6 +329,10 @@ def test_runtime_factory_returns_runtime() -> None:
         business=business,
         provider=provider,
     )
+
+    runtime_dependencies = make_runtime_dependencies(business.business_id)
+    commercial_access = runtime_dependencies.commercial_access
+    tenant = runtime_dependencies.tenant
 
     runtime = AssistantRuntimeFactory.create(
         business=business,
@@ -300,6 +346,8 @@ def test_runtime_factory_returns_runtime() -> None:
             voice=business.assistant_voice,
         ),
         message_adapter=ConversationMessageAdapter(),
+        commercial_access=commercial_access,
+        tenant=tenant,
     )
 
     assert isinstance(runtime, AssistantRuntime)

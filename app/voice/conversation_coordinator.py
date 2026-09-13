@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 
 from app.assistant.orchestrator import AssistantOrchestrator
 from app.assistant.response import AssistantResponse
+from app.identity.tenant import TenantContext
+from app.web.access import BusinessAccessService
 from app.models.business import Business
 from app.models.voice import VoiceConfiguration
 from app.voice.conversation import ConversationState
@@ -46,6 +48,8 @@ class AssistantConversationCoordinator(ConversationCoordinator):
         voice_service: VoiceService,
         voice_configuration: VoiceConfiguration,
         message_adapter: ConversationMessageAdapter,
+        commercial_access: BusinessAccessService,
+        tenant: TenantContext,
         session: ConversationSession | None = None,
     ) -> None:
         if not isinstance(business, Business):
@@ -81,6 +85,21 @@ class AssistantConversationCoordinator(ConversationCoordinator):
                 "message_adapter must be a ConversationMessageAdapter."
             )
 
+        if not isinstance(commercial_access, BusinessAccessService):
+            raise TypeError(
+                "commercial_access must be a BusinessAccessService."
+            )
+
+        if not isinstance(tenant, TenantContext):
+            raise TypeError(
+                "tenant must be a TenantContext."
+            )
+
+        if tenant.business_id != business.business_id:
+            raise ValueError(
+                "Tenant context does not belong to this business."
+            )
+
         if session is not None and not isinstance(
             session,
             ConversationSession,
@@ -96,6 +115,8 @@ class AssistantConversationCoordinator(ConversationCoordinator):
         self._voice_service = voice_service
         self._voice_configuration = voice_configuration
         self._message_adapter = message_adapter
+        self._commercial_access = commercial_access
+        self._tenant = tenant
         self._session = session or ConversationSession()
 
     @property
@@ -111,12 +132,25 @@ class AssistantConversationCoordinator(ConversationCoordinator):
                 "conversation_input must be a ConversationInput."
             )
 
+        # Voice-session admission authorizes entry into the session.
+        # It does not permanently authorize execution.
+        #
+        # Commercial entitlement may change while the session remains
+        # open, therefore current execution access is resolved for every
+        # assistant turn immediately before entering the core pipeline.
+        self._commercial_access.require_execution(
+            self._business.business_id,
+        )
+
         assistant_message = self._message_adapter.to_assistant_message(
             conversation_input,
             self._business.business_id,
         )
 
-        return self._orchestrator.handle(assistant_message)
+        return self._orchestrator.handle(
+            assistant_message,
+            tenant=self._tenant,
+        )
 
     def speak_response(
         self,

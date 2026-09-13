@@ -1,6 +1,8 @@
 from app.assistant.orchestrator import AssistantOrchestrator
 from app.models.business import Business
 from app.models.voice import VoiceConfiguration
+from app.identity.tenant import TenantContext
+from app.web.access import BusinessAccessService
 from app.voice.conversation_coordinator import (
     AssistantConversationCoordinator,
 )
@@ -30,6 +32,8 @@ class AssistantRuntimeFactory:
         voice_service: VoiceService,
         voice_configuration: VoiceConfiguration,
         message_adapter: ConversationMessageAdapter,
+        commercial_access: BusinessAccessService,
+        tenant: TenantContext,
     ) -> AssistantRuntime:
         if not isinstance(business, Business):
             raise TypeError("business must be a Business.")
@@ -70,6 +74,24 @@ class AssistantRuntimeFactory:
                 "message_adapter must be a ConversationMessageAdapter."
             )
 
+        if not isinstance(
+            commercial_access,
+            BusinessAccessService,
+        ):
+            raise TypeError(
+                "commercial_access must be a BusinessAccessService."
+            )
+
+        if not isinstance(tenant, TenantContext):
+            raise TypeError(
+                "tenant must be a TenantContext."
+            )
+
+        if tenant.business_id != business.business_id:
+            raise ValueError(
+                "Tenant context does not belong to this business."
+            )
+
         coordinator = AssistantConversationCoordinator(
             business=business,
             orchestrator=orchestrator,
@@ -78,6 +100,8 @@ class AssistantRuntimeFactory:
             voice_service=voice_service,
             voice_configuration=voice_configuration,
             message_adapter=message_adapter,
+            commercial_access=commercial_access,
+            tenant=tenant,
         )
 
         return AssistantRuntime(
