@@ -20,6 +20,8 @@ from app.persistence.membership_repository import SQLiteMembershipRepository
 from app.persistence.session import SQLiteSessionRepository
 from app.persistence.user_repository import SQLiteUserRepository
 from app.auth.rate_limit import SQLiteAuthenticationRateLimiter
+from app.founder.authorization import FounderAccessDenied, FounderAuthorizationService
+from app.persistence.founder_repository import SQLiteFounderRepository
 from app.web.access import BusinessAccessDenied, BusinessAccessService
 from app.web.auth import SESSION_COOKIE, clear_session_cookie, install_auth_hooks, issue_csrf_cookie, login_required, require_csrf, set_session_cookie
 from app.web.security import WebSecurityError
@@ -52,12 +54,16 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     )
     businesses = SQLiteBusinessRepository(db)
     access = BusinessAccessService(db)
+    founders = SQLiteFounderRepository(db)
+    founder_access = FounderAuthorizationService(founders)
     builder = runtime_builder or _production_runtime_builder
 
     install_auth_hooks(app, auth_service)
     app.extensions["assistant_database"] = db
     app.extensions["assistant_businesses"] = businesses
     app.extensions["assistant_access"] = access
+    app.extensions["assistant_founders"] = founders
+    app.extensions["assistant_founder_access"] = founder_access
 
     @app.errorhandler(BusinessAccessDenied)
     def access_denied(exc):
@@ -65,6 +71,10 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
 
     @app.errorhandler(WebSecurityError)
     def web_security_error(exc):
+        return jsonify({"error": str(exc)}), 403
+
+    @app.errorhandler(FounderAccessDenied)
+    def founder_access_denied(exc):
         return jsonify({"error": str(exc)}), 403
 
     @app.errorhandler(PermissionError)
@@ -88,6 +98,18 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     @app.get("/signup")
     def signup_page():
         return issue_csrf_cookie(app.make_response(render_template("signup.html", voices=sorted(SUPPORTED_VOICES))))
+
+    @app.get("/founder")
+    @login_required
+    def founder_dashboard_page():
+        founder_access.require_founder(g.principal)
+
+        return jsonify(
+            {
+                "message": "Founder Operations boundary active.",
+                "user_id": g.principal.user_id,
+            }
+        )
 
     @app.get("/dashboard")
     @login_required

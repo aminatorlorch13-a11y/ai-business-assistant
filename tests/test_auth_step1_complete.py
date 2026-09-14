@@ -13,7 +13,7 @@ from app.identity.models import BusinessMembership, User, UserRole
 from app.models.business import Business
 from app.persistence.business_repository import SQLiteBusinessRepository
 from app.persistence.credential_repository import SQLiteCredentialRepository
-from app.persistence.database import SQLiteDatabase
+from app.persistence.database import SCHEMA_VERSION, SQLiteDatabase
 from app.persistence.membership_repository import SQLiteMembershipRepository
 from app.persistence.session import SQLiteSessionRepository
 from app.persistence.user_repository import SQLiteUserRepository
@@ -181,7 +181,7 @@ def test_schema_migrates_legacy_v1_to_current_schema(tmp_path):
                 "SELECT value FROM persistence_metadata "
                 "WHERE key='schema_version'"
             ).fetchone()[0]
-            == "5"
+            == str(SCHEMA_VERSION)
         )
 
         # v1 -> v2 migration

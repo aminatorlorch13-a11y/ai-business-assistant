@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.identity.models import BusinessMembership, User, UserRole
-from app.persistence.database import SQLiteDatabase
+from app.persistence.database import SCHEMA_VERSION, SQLiteDatabase
 from app.persistence.membership_repository import SQLiteMembershipRepository
 from app.persistence.whatsapp import SQLiteWhatsAppRepository
 from app.persistence.whatsapp_conversation import (
@@ -651,5 +651,5 @@ def test_v2_to_v4_migration_creates_conversation_schema(tmp_path):
             """
         ).fetchone()
 
-    assert version == "5"
+    assert version == str(SCHEMA_VERSION)
     assert table is not None

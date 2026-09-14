@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class SQLiteDatabase:
@@ -414,11 +414,36 @@ def _migrate_v4_to_v5(connection: sqlite3.Connection) -> None:
         """
     )
 
+
+def _migrate_v5_to_v6(connection: sqlite3.Connection) -> None:
+    """Add explicit platform-level Founder authority."""
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS platform_founders (
+            user_id TEXT PRIMARY KEY,
+            active INTEGER NOT NULL DEFAULT 1
+                CHECK(active IN (0, 1)),
+            FOREIGN KEY(user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_platform_founders_active
+        ON platform_founders(active)
+        """
+    )
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
     3: _migrate_v3_to_v4,
     4: _migrate_v4_to_v5,
+    5: _migrate_v5_to_v6,
 }
 
 # Backwards-compatible name for callers that imported SCHEMA.
