@@ -1,6 +1,15 @@
+from unittest.mock import Mock
+
 import pytest
 
+from app.ai.contextual_provider import ContextualAIProvider
 from app.ai.provider import AIProvider
+from app.memory.context import MemoryContextBuilder, MemoryContext
+from app.assistant.conversation import (
+    ConversationHistory,
+    ConversationRole,
+    ConversationTurn,
+)
 from app.assistant.action import AssistantAction
 from app.assistant.action_executor import ActionExecutor
 from app.assistant.interpretation import AIInterpretation
@@ -57,7 +66,7 @@ class RecordingAIProvider(AIProvider):
         self.messages = []
         self.response_text = response_text
 
-    def interpret(self, message):
+    def interpret(self, message, context):
         self.messages.append(message)
 
         intent = AssistantIntent(
@@ -77,6 +86,34 @@ class RecordingAIProvider(AIProvider):
             intent=intent,
             action=action,
         )
+
+
+
+class ContextRecordingAIProvider(AIProvider, ContextualAIProvider):
+    def __init__(self, response_text="AI response"):
+        self.contexts = []
+        self.messages = []
+        self.response_text = response_text
+
+    def interpret(self, message, context):
+        self.messages.append(message)
+        self.contexts.append(context)
+        return make_recording_interpretation(message, self.response_text)
+
+
+def make_recording_interpretation(message, response_text):
+    intent = AssistantIntent(
+        business_id=message.business_id,
+        intent_type="general_question",
+        instruction=message.content,
+    )
+    action = AssistantAction(
+        business_id=message.business_id,
+        action_type="none",
+        target="assistant",
+        instruction=response_text,
+    )
+    return AIInterpretation(intent=intent, action=action)
 
 
 class RecordingBusinessOperation(BusinessOperation):
@@ -161,9 +198,16 @@ def make_coordinator(
         response_text=response_text,
     )
 
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+    memory_context_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
+
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=AIInterpretationValidator(),
+        memory_context_builder=memory_context_builder,
     )
 
     orchestrator = AssistantOrchestrator(
@@ -198,6 +242,189 @@ def make_coordinator(
         provider,
         speech_input_engine,
         speech_engine,
+    )
+
+
+def test_coordinator_rejects_foreign_business_conversation_history():
+    session = ConversationSession()
+    session.history = ConversationHistory(
+        business_id="business-foreign",
+        turns=(
+            ConversationTurn(
+                business_id="business-foreign",
+                role=ConversationRole.USER,
+                content="This belongs to another business.",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Conversation session history does not belong to this business.",
+    ):
+        make_coordinator(session=session)
+
+
+def test_session_rejects_foreign_business_turn_at_runtime():
+    session = ConversationSession()
+
+    session.record_turn(
+        business_id="business-123",
+        role=ConversationRole.USER,
+        content="Business A conversation.",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Conversation history does not belong to this business.",
+    ):
+        session.record_turn(
+            business_id="business-foreign",
+            role=ConversationRole.USER,
+            content="Business B must never enter Business A history.",
+        )
+
+    assert session.history is not None
+    assert session.history.business_id == "business-123"
+    assert len(session.history.turns) == 1
+    assert session.history.turns[0].business_id == "business-123"
+    assert session.history.turns[0].content == "Business A conversation."
+
+
+def test_failed_interpretation_does_not_record_conversation_history():
+    coordinator, provider, _, _ = make_coordinator()
+
+    original_handle = coordinator._orchestrator.handle
+
+    def failing_handle(*args, **kwargs):
+        raise RuntimeError("AI interpretation failed.")
+
+    coordinator._orchestrator.handle = failing_handle
+
+    with pytest.raises(RuntimeError, match="AI interpretation failed."):
+        coordinator.process_text_turn("This must not become completed history.")
+
+    history = coordinator.session.history
+
+    assert history is not None
+    assert history.business_id == "business-123"
+    assert history.is_empty is True
+
+    # Restore the real handler so this test cannot leave a mutated
+    # coordinator object in an unexpected state if execution changes later.
+    coordinator._orchestrator.handle = original_handle
+
+
+def test_failed_execution_does_not_record_conversation_history():
+    business = make_business()
+
+    provider = RecordingAIProvider(
+        response_text="Execution should not complete."
+    )
+
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+    memory_context_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
+
+    processor = AssistantProcessor(
+        ai_provider=provider,
+        validator=AIInterpretationValidator(),
+        memory_context_builder=memory_context_builder,
+    )
+
+    class FailingActionExecutor(ActionExecutor):
+        def __init__(self):
+            super().__init__(
+                policy=ActionPolicy(),
+                operation=RecordingBusinessOperation(),
+            )
+
+        def execute(self, action, confirmed=False, tenant=None):
+            raise RuntimeError("Business execution failed.")
+
+    orchestrator = AssistantOrchestrator(
+        business=business,
+        processor=processor,
+        executor=FailingActionExecutor(),
+    )
+
+    runtime_dependencies = make_runtime_dependencies(business.business_id)
+
+    coordinator = AssistantConversationCoordinator(
+        business=business,
+        orchestrator=orchestrator,
+        speech_input_engine=RecordingSpeechInputEngine(
+            ["This action must not become completed history."]
+        ),
+        speech_engine=RecordingSpeechEngine(),
+        voice_service=VoiceService(),
+        voice_configuration=VoiceConfiguration(
+            voice="female",
+            speed=1.0,
+        ),
+        message_adapter=ConversationMessageAdapter(),
+        commercial_access=runtime_dependencies.commercial_access,
+        tenant=runtime_dependencies.tenant,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Business execution failed.",
+    ):
+        coordinator.process_text_turn(
+            "This action must not become completed history."
+        )
+
+    history = coordinator.session.history
+
+    assert history is not None
+    assert history.business_id == business.business_id
+    assert history.is_empty is True
+
+
+def test_speech_failure_preserves_completed_conversation_history():
+    class FailingSpeechEngine(RecordingSpeechEngine):
+        def speak(self, request):
+            super().speak(request)
+            raise RuntimeError("Speech synthesis failed.")
+
+    speech_engine = FailingSpeechEngine()
+
+    coordinator, provider, _, _ = make_coordinator(
+        response_text="The business request was successfully completed.",
+        speech_engine=speech_engine,
+    )
+
+    response = coordinator.process_text_turn(
+        "Complete this business request."
+    )
+
+    assert response.message == (
+        "The business request was successfully completed."
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Speech synthesis failed.",
+    ):
+        coordinator.speak_response(response)
+
+    history = coordinator.session.history
+
+    assert history is not None
+    assert history.business_id == "business-123"
+    assert len(history.turns) == 2
+
+    assert history.turns[0].role == ConversationRole.USER
+    assert history.turns[0].content == (
+        "Complete this business request."
+    )
+
+    assert history.turns[1].role == ConversationRole.ASSISTANT
+    assert history.turns[1].content == (
+        "The business request was successfully completed."
     )
 
 
@@ -250,6 +477,273 @@ def test_process_text_turn_uses_same_conversation_pipeline():
     assert len(provider.messages) == 1
     assert provider.messages[0].business_id == "business-123"
     assert provider.messages[0].content == "Hello by text."
+
+
+def test_coordinator_keeps_long_conversation_history_bounded():
+    business = make_business()
+    provider = ContextRecordingAIProvider(response_text="Acknowledged.")
+
+    memory_builder = Mock(spec=MemoryContextBuilder)
+    memory_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
+
+    session = ConversationSession()
+
+    processor = AssistantProcessor(
+        ai_provider=provider,
+        validator=AIInterpretationValidator(),
+        memory_context_builder=memory_builder,
+    )
+
+    orchestrator = AssistantOrchestrator(
+        business=business,
+        processor=processor,
+        executor=make_action_executor(),
+    )
+
+    coordinator = AssistantConversationCoordinator(
+        business=business,
+        orchestrator=orchestrator,
+        speech_input_engine=RecordingSpeechInputEngine([]),
+        speech_engine=RecordingSpeechEngine(),
+        voice_service=VoiceService(),
+        voice_configuration=VoiceConfiguration(
+            voice="female",
+            speed=1.0,
+        ),
+        message_adapter=ConversationMessageAdapter(),
+        session=session,
+    )
+
+    for number in range(1, 31):
+        coordinator.process_text_turn(
+            f"Conversation message {number}."
+        )
+
+    assert len(provider.messages) == 30
+    assert len(provider.contexts) == 30
+
+    final_history = provider.contexts[-1].conversation_history
+
+    assert final_history.business_id == business.business_id
+    assert final_history.max_turns == 24
+    assert len(final_history.turns) == 24
+
+    # The 30th request receives only the 24 most recent
+    # completed turns as prior conversation context.
+    expected_contents = []
+    for number in range(18, 30):
+        expected_contents.append(f"Conversation message {number}.")
+        expected_contents.append("Acknowledged.")
+
+    assert [turn.content for turn in final_history.turns] == expected_contents
+
+    assert all(
+        turn.business_id == business.business_id
+        for turn in final_history.turns
+    )
+
+    assert final_history.turns[0].role == ConversationRole.USER
+    assert final_history.turns[-1].role == ConversationRole.ASSISTANT
+
+
+def test_new_conversation_session_starts_with_empty_history():
+    business = make_business()
+    provider = ContextRecordingAIProvider(response_text="Acknowledged.")
+
+    memory_builder = Mock(spec=MemoryContextBuilder)
+    memory_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
+
+    processor = AssistantProcessor(
+        ai_provider=provider,
+        validator=AIInterpretationValidator(),
+        memory_context_builder=memory_builder,
+    )
+
+    orchestrator = AssistantOrchestrator(
+        business=business,
+        processor=processor,
+        executor=make_action_executor(),
+    )
+
+    first_session = ConversationSession()
+
+    first_coordinator = AssistantConversationCoordinator(
+        business=business,
+        orchestrator=orchestrator,
+        speech_input_engine=RecordingSpeechInputEngine([]),
+        speech_engine=RecordingSpeechEngine(),
+        voice_service=VoiceService(),
+        voice_configuration=VoiceConfiguration(
+            voice="female",
+            speed=1.0,
+        ),
+        message_adapter=ConversationMessageAdapter(),
+        session=first_session,
+    )
+
+    first_coordinator.process_text_turn(
+        "This belongs to the first conversation."
+    )
+
+    assert len(provider.contexts) == 1
+    assert provider.contexts[0].conversation_history.is_empty is True
+
+    second_session = ConversationSession()
+
+    second_coordinator = AssistantConversationCoordinator(
+        business=business,
+        orchestrator=orchestrator,
+        speech_input_engine=RecordingSpeechInputEngine([]),
+        speech_engine=RecordingSpeechEngine(),
+        voice_service=VoiceService(),
+        voice_configuration=VoiceConfiguration(
+            voice="female",
+            speed=1.0,
+        ),
+        message_adapter=ConversationMessageAdapter(),
+        session=second_session,
+    )
+
+    second_coordinator.process_text_turn(
+        "This belongs to the second conversation."
+    )
+
+    assert len(provider.contexts) == 2
+
+    second_history = provider.contexts[1].conversation_history
+
+    assert second_history.business_id == business.business_id
+    assert second_history.is_empty is True
+
+    assert second_session.history is not None
+    assert second_session.history.business_id == business.business_id
+    assert second_session.history.is_empty is False
+
+    assert first_session.history is not None
+    assert first_session.history.business_id == business.business_id
+    assert first_session.history.is_empty is False
+
+
+def test_ended_conversation_rejects_direct_input_processing():
+    business = make_business()
+    provider = ContextRecordingAIProvider(response_text="Acknowledged.")
+
+    memory_builder = Mock(spec=MemoryContextBuilder)
+    memory_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
+
+    processor = AssistantProcessor(
+        ai_provider=provider,
+        validator=AIInterpretationValidator(),
+        memory_context_builder=memory_builder,
+    )
+
+    orchestrator = AssistantOrchestrator(
+        business=business,
+        processor=processor,
+        executor=make_action_executor(),
+    )
+
+    session = ConversationSession()
+
+    coordinator = AssistantConversationCoordinator(
+        business=business,
+        orchestrator=orchestrator,
+        speech_input_engine=RecordingSpeechInputEngine([]),
+        speech_engine=RecordingSpeechEngine(),
+        voice_service=VoiceService(),
+        voice_configuration=VoiceConfiguration(
+            voice="female",
+            speed=1.0,
+        ),
+        message_adapter=ConversationMessageAdapter(),
+        session=session,
+    )
+
+    coordinator.process_text_turn(
+        "This turn completes before the session ends."
+    )
+
+    assert session.history is not None
+    assert len(session.history.turns) == 2
+
+    session.stop()
+
+    assert session.state is ConversationState.ENDED
+
+    with pytest.raises(RuntimeError, match="ended"):
+        coordinator.process_text_turn(
+            "This must never reach the Assistant Core."
+        )
+
+    assert len(provider.messages) == 1
+    assert len(provider.contexts) == 1
+
+
+def test_ended_conversation_rejects_voice_input_processing():
+    business = make_business()
+    provider = ContextRecordingAIProvider(response_text="Acknowledged.")
+
+    memory_builder = Mock(spec=MemoryContextBuilder)
+    memory_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
+
+    processor = AssistantProcessor(
+        ai_provider=provider,
+        validator=AIInterpretationValidator(),
+        memory_context_builder=memory_builder,
+    )
+
+    orchestrator = AssistantOrchestrator(
+        business=business,
+        processor=processor,
+        executor=make_action_executor(),
+    )
+
+    session = ConversationSession()
+
+    coordinator = AssistantConversationCoordinator(
+        business=business,
+        orchestrator=orchestrator,
+        speech_input_engine=RecordingSpeechInputEngine([]),
+        speech_engine=RecordingSpeechEngine(),
+        voice_service=VoiceService(),
+        voice_configuration=VoiceConfiguration(
+            voice="female",
+            speed=1.0,
+        ),
+        message_adapter=ConversationMessageAdapter(),
+        session=session,
+    )
+
+    coordinator.process_text_turn(
+        "Complete the first conversation turn."
+    )
+
+    session.stop()
+
+    assert session.state is ConversationState.ENDED
+
+    voice_input = ConversationInput(
+        text="This voice turn must never execute.",
+        source=ConversationInputSource.VOICE,
+    )
+
+    with pytest.raises(RuntimeError, match="ended"):
+        coordinator.process_input(voice_input)
+
+    assert len(provider.messages) == 1
+    assert len(provider.contexts) == 1
 
 
 def test_voice_and_text_inputs_share_same_business_boundary():
@@ -430,14 +924,21 @@ def test_ended_session_cannot_restart():
 
 def test_processing_failure_moves_session_to_error():
     class FailingAIProvider(AIProvider):
-        def interpret(self, message):
+        def interpret(self, message, context):
             raise RuntimeError("AI processing failed.")
 
     business = make_business()
 
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+    memory_context_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
+
     processor = AssistantProcessor(
         ai_provider=FailingAIProvider(),
         validator=AIInterpretationValidator(),
+        memory_context_builder=memory_context_builder,
     )
 
     orchestrator = AssistantOrchestrator(
@@ -506,3 +1007,77 @@ def test_run_preserves_state_after_successful_turn():
     assert speech_engine.requests[0].text == "Hello from Configured Test Assistant."
     assert speech_input_engine.calls == 1
     assert coordinator.session.state is ConversationState.ENDED
+
+def test_same_conversation_exposes_prior_turns_to_assistant_core():
+    business = make_business()
+    provider = ContextRecordingAIProvider()
+
+    memory_builder = Mock(spec=MemoryContextBuilder)
+    memory_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
+
+    session = ConversationSession()
+
+    processor = AssistantProcessor(
+        ai_provider=provider,
+        validator=AIInterpretationValidator(),
+        memory_context_builder=memory_builder,
+    )
+
+    orchestrator = AssistantOrchestrator(
+        business=business,
+        processor=processor,
+        executor=make_action_executor(),
+    )
+
+    coordinator = AssistantConversationCoordinator(
+        business=business,
+        orchestrator=orchestrator,
+        speech_input_engine=RecordingSpeechInputEngine([]),
+        speech_engine=RecordingSpeechEngine(),
+        voice_service=VoiceService(),
+        voice_configuration=VoiceConfiguration(
+            voice="female",
+            speed=1.0,
+        ),
+        message_adapter=ConversationMessageAdapter(),
+        session=session,
+    )
+
+    coordinator.process_text_turn(
+        "Research the VAT registration requirements."
+    )
+    coordinator.process_text_turn(
+        "Now summarize what you found."
+    )
+
+    assert len(provider.contexts) == 2
+
+    first_context = provider.contexts[0]
+    second_context = provider.contexts[1]
+
+    # The first message has no completed prior conversation.
+    assert first_context.conversation_history.is_empty is True
+
+    # The second message receives the completed first turn as prior context.
+    # The current second message remains separate in provider.messages[1].
+    history = second_context.conversation_history
+
+    assert history.business_id == business.business_id
+    assert len(history.turns) == 2
+
+    assert history.turns[0].business_id == business.business_id
+    assert history.turns[0].role.value == "user"
+    assert history.turns[0].content == (
+        "Research the VAT registration requirements."
+    )
+
+    assert history.turns[1].business_id == business.business_id
+    assert history.turns[1].role.value == "assistant"
+    assert history.turns[1].content == "AI response"
+
+    assert provider.messages[1].content == (
+        "Now summarize what you found."
+    )

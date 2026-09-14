@@ -1,13 +1,15 @@
 from dataclasses import dataclass
 
+from app.assistant.conversation import ConversationHistory, ConversationRole, ConversationTurn
 from app.voice.conversation import ConversationState
 
 
 @dataclass
 class ConversationSession:
-    """Owns the lifecycle state of one assistant conversation."""
+    """Owns lifecycle state and active conversational history for one session."""
 
     state: ConversationState = ConversationState.IDLE
+    history: ConversationHistory | None = None
 
     def start_listening(self) -> None:
         """Move an idle or waiting session into listening."""
@@ -57,6 +59,30 @@ class ConversationSession:
         """Recover from an error by returning to the input phase."""
         self._require(ConversationState.ERROR)
         self.state = ConversationState.WAITING_FOR_INPUT
+
+    def record_turn(
+        self,
+        *,
+        business_id: str,
+        role: ConversationRole,
+        content: str,
+    ) -> None:
+        """Append a validated conversational turn to this session."""
+        if self.history is None:
+            self.history = ConversationHistory(business_id=business_id)
+
+        if self.history.business_id != business_id:
+            raise ValueError(
+                "Conversation history does not belong to this business."
+            )
+
+        self.history = self.history.append(
+            ConversationTurn(
+                business_id=business_id,
+                role=role,
+                content=content,
+            )
+        )
 
     def _require(self, expected: ConversationState) -> None:
         if self.state != expected:

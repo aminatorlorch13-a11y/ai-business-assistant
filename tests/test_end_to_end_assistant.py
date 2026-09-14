@@ -1,3 +1,6 @@
+from unittest.mock import Mock
+from app.memory.context import MemoryContextBuilder
+from app.memory.context import MemoryContext
 from app.ai.deterministic_raw_provider import DeterministicRawAIProvider
 from app.ai.interpreting_provider import InterpretingAIProvider
 from app.ai.rule_based_provider import RuleBasedAIProvider
@@ -23,10 +26,18 @@ def make_business() -> Business:
 
 def test_assistant_handles_create_appointment_end_to_end():
     provider = RuleBasedAIProvider()
+    business = make_business()
+
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+    memory_context_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
 
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=AIInterpretationValidator(),
+        memory_context_builder=memory_context_builder,
     )
 
     operation = AppointmentOperation()
@@ -38,7 +49,7 @@ def test_assistant_handles_create_appointment_end_to_end():
     )
 
     orchestrator = AssistantOrchestrator(
-        business=make_business(),
+        business=business,
         processor=processor,
         executor=executor,
     )
@@ -61,10 +72,18 @@ def test_assistant_handles_create_appointment_with_interpreting_ai_provider():
     provider = InterpretingAIProvider(
         raw_provider=DeterministicRawAIProvider(),
     )
+    business = make_business()
+
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+    memory_context_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
 
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=AIInterpretationValidator(),
+        memory_context_builder=memory_context_builder,
     )
 
     operation = AppointmentOperation()
@@ -76,7 +95,7 @@ def test_assistant_handles_create_appointment_with_interpreting_ai_provider():
     )
 
     orchestrator = AssistantOrchestrator(
-        business=make_business(),
+        business=business,
         processor=processor,
         executor=executor,
     )

@@ -7,12 +7,17 @@ from app.assistant.message import AssistantMessage
 
 @runtime_checkable
 class ContextualAIProvider(Protocol):
-    """Optional capability for AI providers that consume controlled context."""
+    """Deprecated compatibility protocol.
+
+    Context is now a mandatory part of the AIProvider contract.
+    New providers must implement AIProvider.interpret(message, context)
+    directly rather than relying on this optional protocol.
+    """
 
     def interpret_with_context(
         self,
         message: AssistantMessage,
         context: AIContext,
     ) -> AIInterpretation:
-        """Interpret a message using controlled AI context."""
+        """Legacy contextual-provider capability."""
         ...

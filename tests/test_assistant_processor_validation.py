@@ -1,3 +1,6 @@
+from app.memory.context import MemoryContextBuilder
+from app.memory.context import MemoryContext
+from app.ai.context import AIContext
 from unittest.mock import Mock
 
 import pytest
@@ -28,6 +31,15 @@ def make_interpretation() -> AIInterpretation:
     )
 
 
+def make_memory_context_builder() -> Mock:
+    builder = Mock(spec=MemoryContextBuilder)
+    builder.build.return_value = MemoryContext(
+        business_id="business-001",
+        memories=(),
+    )
+    return builder
+
+
 def test_processor_validates_ai_interpretation():
     provider = Mock(spec=AIProvider)
     validator = Mock(spec=AIInterpretationValidator)
@@ -37,9 +49,12 @@ def test_processor_validates_ai_interpretation():
     provider.interpret.return_value = interpretation
     validator.validate.return_value = interpretation
 
+    memory_context_builder = make_memory_context_builder()
+
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=validator,
+        memory_context_builder=memory_context_builder,
     )
 
     message = AssistantMessage(
@@ -51,7 +66,11 @@ def test_processor_validates_ai_interpretation():
 
     assert result == interpretation
 
-    provider.interpret.assert_called_once_with(message)
+    provider.interpret.assert_called_once()
+    called_message, called_context = provider.interpret.call_args.args
+    assert called_message == message
+    assert isinstance(called_context, AIContext)
+    assert called_context.memory_context.business_id == "business-001"
     validator.validate.assert_called_once_with(
         interpretation,
         business_id="business-001",
@@ -69,9 +88,12 @@ def test_processor_rejects_invalid_ai_interpretation():
         "Invalid AI interpretation."
     )
 
+    memory_context_builder = make_memory_context_builder()
+
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=validator,
+        memory_context_builder=memory_context_builder,
     )
 
     message = AssistantMessage(
@@ -82,7 +104,11 @@ def test_processor_rejects_invalid_ai_interpretation():
     with pytest.raises(ValueError):
         processor.process(message)
 
-    provider.interpret.assert_called_once_with(message)
+    provider.interpret.assert_called_once()
+    called_message, called_context = provider.interpret.call_args.args
+    assert called_message == message
+    assert isinstance(called_context, AIContext)
+    assert called_context.memory_context.business_id == "business-001"
     validator.validate.assert_called_once()
 
 
@@ -106,9 +132,12 @@ def test_processor_rejects_non_message_input():
     provider = Mock(spec=AIProvider)
     validator = Mock(spec=AIInterpretationValidator)
 
+    memory_context_builder = make_memory_context_builder()
+
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=validator,
+        memory_context_builder=memory_context_builder,
     )
 
     with pytest.raises(TypeError, match="message"):
@@ -126,9 +155,12 @@ def test_processor_rejects_provider_returning_wrong_type():
         "intent_type": "business_task",
     }
 
+    memory_context_builder = make_memory_context_builder()
+
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=validator,
+        memory_context_builder=memory_context_builder,
     )
 
     message = AssistantMessage(
@@ -153,9 +185,12 @@ def test_processor_rejects_validator_returning_wrong_type():
         "invalid": "interpretation",
     }
 
+    memory_context_builder = make_memory_context_builder()
+
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=validator,
+        memory_context_builder=memory_context_builder,
     )
 
     message = AssistantMessage(

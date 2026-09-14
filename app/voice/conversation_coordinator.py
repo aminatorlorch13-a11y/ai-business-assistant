@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+from app.assistant.conversation import ConversationHistory, ConversationRole
 from app.assistant.orchestrator import AssistantOrchestrator
 from app.assistant.response import AssistantResponse
 from app.identity.tenant import TenantContext
@@ -26,17 +27,9 @@ class AssistantConversationCoordinator(ConversationCoordinator):
     """
     Coordinates continuous voice/text conversation for one business.
 
-    Conversation input always enters the normal assistant pipeline.
-    Voice does not bypass interpretation, validation, authorization,
-    or execution safeguards.
-
-    Session lifecycle transitions are owned by ConversationSession.
-    Natural-language commands such as "stop" are not interpreted here
-    as low-level session termination. They first pass through the
-    normal assistant command pipeline.
-
-    The coordinator also respects terminal session state changes that
-    occur during downstream operations such as speech output.
+    Conversation history belongs to the active session, while the Assistant
+    Core remains stateless. Prior completed turns are supplied to the core as
+    controlled context for each new message.
     """
 
     def __init__(
@@ -119,6 +112,15 @@ class AssistantConversationCoordinator(ConversationCoordinator):
         self._tenant = tenant
         self._session = session or ConversationSession()
 
+        if self._session.history is None:
+            self._session.history = ConversationHistory(
+                business_id=business.business_id,
+            )
+        elif self._session.history.business_id != business.business_id:
+            raise ValueError(
+                "Conversation session history does not belong to this business."
+            )
+
     @property
     def session(self) -> ConversationSession:
         return self._session
@@ -132,12 +134,11 @@ class AssistantConversationCoordinator(ConversationCoordinator):
                 "conversation_input must be a ConversationInput."
             )
 
-        # Voice-session admission authorizes entry into the session.
-        # It does not permanently authorize execution.
-        #
-        # Commercial entitlement may change while the session remains
-        # open, therefore current execution access is resolved for every
-        # assistant turn immediately before entering the core pipeline.
+        if self._session.state == ConversationState.ENDED:
+            raise RuntimeError(
+                "Cannot process input for an ended conversation."
+            )
+
         self._commercial_access.require_execution(
             self._business.business_id,
         )
@@ -147,10 +148,32 @@ class AssistantConversationCoordinator(ConversationCoordinator):
             self._business.business_id,
         )
 
-        return self._orchestrator.handle(
+        # The current message remains separate from history while it is being
+        # interpreted. History represents completed prior turns.
+        prior_history = self._session.history
+
+        response = self._orchestrator.handle(
             assistant_message,
             tenant=self._tenant,
+            conversation_history=prior_history,
         )
+
+        # Only record a conversational turn after the Assistant Core has
+        # successfully produced a real response. This prevents a failed
+        # interpretation/execution from creating a false completed turn.
+        self._session.record_turn(
+            business_id=self._business.business_id,
+            role=ConversationRole.USER,
+            content=assistant_message.content,
+        )
+
+        self._session.record_turn(
+            business_id=self._business.business_id,
+            role=ConversationRole.ASSISTANT,
+            content=response.message,
+        )
+
+        return response
 
     def speak_response(
         self,
@@ -181,7 +204,10 @@ class AssistantConversationCoordinator(ConversationCoordinator):
             source=ConversationInputSource.VOICE,
         )
 
-    def process_text_turn(self, text: str) -> AssistantResponse:
+    def process_text_turn(
+        self,
+        text: str,
+    ) -> AssistantResponse:
         return self.process_input(
             ConversationInput(
                 text=text,
@@ -193,10 +219,10 @@ class AssistantConversationCoordinator(ConversationCoordinator):
         """
         Run continuous voice conversation until the session ends.
 
-        A terminal session state reached during a downstream operation
-        is respected immediately. The coordinator never attempts to
-        transition an already-ended session back into an active state
-        or into an error state.
+        A terminal session state reached during a downstream operation is
+        respected immediately. The coordinator never attempts to transition
+        an already-ended session back into an active state or into an error
+        state.
         """
         if self._session.state == ConversationState.ENDED:
             raise RuntimeError(

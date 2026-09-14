@@ -1,3 +1,4 @@
+from app.assistant.conversation import ConversationHistory
 from app.assistant.message import AssistantMessage
 from app.assistant.processor import AssistantProcessor
 from app.assistant.response import AssistantResponse
@@ -26,11 +27,14 @@ class AssistantOrchestrator:
         confirmed: bool = False,
         automation_context: AutomationContext | None = None,
         tenant: TenantContext | None = None,
+        conversation_history: ConversationHistory | None = None,
     ) -> AssistantResponse:
         """Process a message and execute its interpreted action."""
 
         if message.business_id != self._business.business_id:
-            raise ValueError("Message does not belong to this business.")
+            raise ValueError(
+                "Message does not belong to this business."
+            )
 
         if automation_context is not None and not isinstance(
             automation_context,
@@ -48,23 +52,40 @@ class AssistantOrchestrator:
                 "Automation context does not belong to this message business."
             )
 
+        if conversation_history is not None and not isinstance(
+            conversation_history,
+            ConversationHistory,
+        ):
+            raise TypeError(
+                "conversation_history must be a ConversationHistory or None."
+            )
+
+        if (
+            conversation_history is not None
+            and conversation_history.business_id != message.business_id
+        ):
+            raise ValueError(
+                "Conversation history does not belong to this message business."
+            )
+
         if tenant is not None and not isinstance(tenant, TenantContext):
             raise TypeError(
                 "tenant must be a TenantContext or None."
             )
 
-        if tenant is not None and tenant.business_id != message.business_id:
+        if (
+            tenant is not None
+            and tenant.business_id != message.business_id
+        ):
             raise ValueError(
                 "Execution tenant does not belong to this message business."
             )
 
-        if automation_context is None:
-            interpretation = self._processor.process(message)
-        else:
-            interpretation = self._processor.process(
-                message,
-                automation_context=automation_context,
-            )
+        interpretation = self._processor.process(
+            message,
+            automation_context=automation_context,
+            conversation_history=conversation_history,
+        )
 
         if interpretation.intent.business_id != self._business.business_id:
             raise ValueError(

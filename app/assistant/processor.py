@@ -1,7 +1,7 @@
 from app.ai.context import AIContext
-from app.ai.contextual_provider import ContextualAIProvider
 from app.automation.context import AutomationContext
 from app.ai.provider import AIProvider
+from app.assistant.conversation import ConversationHistory
 from app.assistant.interpretation import AIInterpretation
 from app.assistant.interpretation_validator import AIInterpretationValidator
 from app.assistant.message import AssistantMessage
@@ -25,9 +25,9 @@ class AssistantProcessor:
                 "validator must be an AIInterpretationValidator."
             )
 
-        if memory_context_builder is not None and not isinstance(
-            memory_context_builder,
-            MemoryContextBuilder,
+        if (
+            memory_context_builder is not None
+            and not isinstance(memory_context_builder, MemoryContextBuilder)
         ):
             raise TypeError(
                 "memory_context_builder must be a MemoryContextBuilder or None."
@@ -41,11 +41,19 @@ class AssistantProcessor:
         self,
         message: AssistantMessage,
         automation_context: AutomationContext | None = None,
+        conversation_history: ConversationHistory | None = None,
     ) -> AIInterpretation:
-        """Interpret, optionally contextualize, and validate one message."""
-
+        """Interpret one message using controlled contextual state."""
         if not isinstance(message, AssistantMessage):
             raise TypeError("message must be an AssistantMessage.")
+
+        if conversation_history is not None and not isinstance(
+            conversation_history,
+            ConversationHistory,
+        ):
+            raise TypeError(
+                "conversation_history must be a ConversationHistory or None."
+            )
 
         if automation_context is not None and not isinstance(
             automation_context,
@@ -53,6 +61,14 @@ class AssistantProcessor:
         ):
             raise TypeError(
                 "automation_context must be an AutomationContext or None."
+            )
+
+        if (
+            conversation_history is not None
+            and conversation_history.business_id != message.business_id
+        ):
+            raise ValueError(
+                "Conversation history does not belong to this message business."
             )
 
         if (
@@ -66,6 +82,7 @@ class AssistantProcessor:
         interpretation = self._interpret(
             message,
             automation_context=automation_context,
+            conversation_history=conversation_history,
         )
 
         if not isinstance(interpretation, AIInterpretation):
@@ -89,25 +106,25 @@ class AssistantProcessor:
         self,
         message: AssistantMessage,
         automation_context: AutomationContext | None = None,
+        conversation_history: ConversationHistory | None = None,
     ) -> AIInterpretation:
-        """Select the safest supported provider interpretation path."""
-
-        if (
-            self._memory_context_builder is not None
-            and isinstance(self._ai_provider, ContextualAIProvider)
-        ):
-            memory_context = self._memory_context_builder.build(
-                message.business_id
+        """Build controlled context and invoke the canonical provider contract."""
+        if self._memory_context_builder is None:
+            raise RuntimeError(
+                "A MemoryContextBuilder is required for AI processing."
             )
 
-            context = AIContext(
-                memory_context,
-                automation_context=automation_context,
-            )
+        memory_context = self._memory_context_builder.build(
+            message.business_id
+        )
 
-            return self._ai_provider.interpret_with_context(
-                message,
-                context,
-            )
+        context = AIContext(
+            memory_context,
+            conversation_history=conversation_history,
+            automation_context=automation_context,
+        )
 
-        return self._ai_provider.interpret(message)
+        return self._ai_provider.interpret(
+            message,
+            context,
+        )

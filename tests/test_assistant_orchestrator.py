@@ -62,7 +62,11 @@ def test_orchestrator_executes_interpreted_action():
         message="Appointment creation requested.",
     )
 
-    processor.process.assert_called_once_with(message)
+    processor.process.assert_called_once_with(
+        message,
+        automation_context=None,
+        conversation_history=None,
+    )
     executor.execute.assert_called_once_with(
         make_interpretation().action,
         tenant=None,
@@ -126,7 +130,11 @@ def test_orchestrator_does_not_return_success_when_execution_fails():
     with pytest.raises(RuntimeError, match="Appointment service unavailable"):
         orchestrator.handle(message)
 
-    processor.process.assert_called_once_with(message)
+    processor.process.assert_called_once_with(
+        message,
+        automation_context=None,
+        conversation_history=None,
+    )
     executor.execute.assert_called_once_with(
         make_interpretation().action,
         tenant=None,

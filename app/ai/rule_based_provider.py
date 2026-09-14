@@ -1,5 +1,4 @@
 from app.ai.context import AIContext
-from app.ai.contextual_provider import ContextualAIProvider
 from app.ai.provider import AIProvider
 from app.assistant.action import AssistantAction
 from app.assistant.intent import AssistantIntent
@@ -7,20 +6,17 @@ from app.assistant.interpretation import AIInterpretation
 from app.assistant.message import AssistantMessage
 
 
-class RuleBasedAIProvider(AIProvider, ContextualAIProvider):
+class RuleBasedAIProvider(AIProvider):
     """Deterministic provider used to validate the assistant pipeline."""
 
-    def interpret(self, message: AssistantMessage) -> AIInterpretation:
-        """Interpret a message without additional context."""
-
-        return self._interpret_message(message)
-
-    def interpret_with_context(
+    def interpret(
         self,
         message: AssistantMessage,
         context: AIContext,
     ) -> AIInterpretation:
-        """Interpret a message using controlled assistant context."""
+        """Interpret a message using the canonical context-aware contract."""
+        if not isinstance(message, AssistantMessage):
+            raise TypeError("message must be an AssistantMessage.")
 
         if not isinstance(context, AIContext):
             raise TypeError("context must be an AIContext.")
@@ -62,7 +58,7 @@ class RuleBasedAIProvider(AIProvider, ContextualAIProvider):
             action=AssistantAction(
                 business_id=message.business_id,
                 action_type="none",
-                target="appointment",
+                target="assistant",
                 instruction="No business action required.",
             ),
         )

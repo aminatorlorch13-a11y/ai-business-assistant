@@ -1,3 +1,6 @@
+from app.memory.context import MemoryContextBuilder
+from app.memory.context import MemoryContext
+from app.ai.context import AIContext
 from unittest.mock import Mock
 
 from app.assistant.action import AssistantAction
@@ -30,9 +33,16 @@ def test_processor_delegates_to_ai_provider():
     expected_interpretation = make_interpretation()
     provider.interpret.return_value = expected_interpretation
 
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+    memory_context_builder.build.return_value = MemoryContext(
+        business_id="business-001",
+        memories=(),
+    )
+
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=AIInterpretationValidator(),
+        memory_context_builder=memory_context_builder,
     )
 
     message = AssistantMessage(
@@ -43,4 +53,14 @@ def test_processor_delegates_to_ai_provider():
     result = processor.process(message)
 
     assert result == expected_interpretation
-    provider.interpret.assert_called_once_with(message)
+    provider.interpret.assert_called_once()
+    called_message, called_context = provider.interpret.call_args.args
+
+    assert called_message == message
+    assert isinstance(called_context, AIContext)
+    assert called_context.memory_context == MemoryContext(
+        business_id="business-001",
+        memories=(),
+    )
+    assert called_context.conversation_history.is_empty
+    assert called_context.automation_context is None

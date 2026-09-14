@@ -1,8 +1,13 @@
 from __future__ import annotations
+from unittest.mock import Mock
+
+from app.memory.context import MemoryContextBuilder
+from app.memory.context import MemoryContext
 
 import pytest
 
 from app.ai.provider import AIProvider
+from app.ai.context import AIContext
 from app.application.runtime import AssistantRuntime
 from app.application.runtime_factory import AssistantRuntimeFactory
 from app.assistant.action import AssistantAction
@@ -87,9 +92,15 @@ class RecordingAIProvider(AIProvider):
 
     def __init__(self) -> None:
         self.messages = []
+        self.contexts = []
 
-    def interpret(self, message):
+    def interpret(
+        self,
+        message: AssistantMessage,
+        context: AIContext,
+    ) -> AIInterpretation:
         self.messages.append(message)
+        self.contexts.append(context)
 
         intent = AssistantIntent(
             business_id=message.business_id,
@@ -242,9 +253,16 @@ def build_orchestrator(
     business: Business,
     provider: AIProvider,
 ) -> tuple[AssistantOrchestrator, RecordingBusinessOperation]:
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+    memory_context_builder.build.return_value = MemoryContext(
+        business_id=business.business_id,
+        memories=(),
+    )
+
     processor = AssistantProcessor(
         ai_provider=provider,
         validator=AIInterpretationValidator(),
+        memory_context_builder=memory_context_builder,
     )
 
     operation = RecordingBusinessOperation()
