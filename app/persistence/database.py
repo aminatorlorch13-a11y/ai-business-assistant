@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class SQLiteDatabase:
@@ -438,12 +438,95 @@ def _migrate_v5_to_v6(connection: sqlite3.Connection) -> None:
         """
     )
 
+
+def _migrate_v6_to_v7(connection: sqlite3.Connection) -> None:
+    """Add the append-only platform event evidence foundation."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS platform_events (
+            event_id TEXT PRIMARY KEY,
+            occurred_at TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            business_id TEXT,
+            user_id TEXT,
+            channel TEXT NOT NULL,
+            actor_type TEXT NOT NULL,
+            action TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            correlation_id TEXT NOT NULL,
+            metadata TEXT NOT NULL
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_platform_events_business_time
+        ON platform_events(business_id, occurred_at DESC)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_platform_events_user_time
+        ON platform_events(user_id, occurred_at DESC)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_platform_events_type_time
+        ON platform_events(event_type, occurred_at DESC)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_platform_events_correlation
+        ON platform_events(correlation_id)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_platform_events_outcome_time
+        ON platform_events(outcome, occurred_at DESC)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS platform_events_no_update
+        BEFORE UPDATE ON platform_events
+        BEGIN
+            SELECT RAISE(
+                ABORT,
+                'platform_events are append-only'
+            );
+        END
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS platform_events_no_delete
+        BEFORE DELETE ON platform_events
+        BEGIN
+            SELECT RAISE(
+                ABORT,
+                'platform_events are append-only'
+            );
+        END
+        """
+    )
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
     3: _migrate_v3_to_v4,
     4: _migrate_v4_to_v5,
     5: _migrate_v5_to_v6,
+    6: _migrate_v6_to_v7,
 }
 
 # Backwards-compatible name for callers that imported SCHEMA.
