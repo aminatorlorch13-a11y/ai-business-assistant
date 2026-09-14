@@ -28,6 +28,26 @@ class SQLiteBusinessRepository:
             )
         return business
 
+    def list_all(self, limit: int = 100) -> list[Business]:
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("limit must be an integer.")
+        if limit < 1 or limit > 500:
+            raise ValueError("limit must be between 1 and 500.")
+
+        with self._database.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT business_id, name, owner_name,
+                       assistant_name, assistant_voice
+                FROM businesses
+                ORDER BY business_id
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [Business(**dict(row)) for row in rows]
+
     def get(self, business_id: str) -> Business | None:
         _validate_id(business_id)
         with self._database.connection() as connection:

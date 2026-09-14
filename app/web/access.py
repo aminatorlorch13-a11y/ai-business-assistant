@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.commercial.state import CommercialStatus, BusinessCommercialState
-from app.commercial.trial import BusinessTrial
 from app.persistence.commercial_state_repository import SQLiteCommercialStateRepository
 from app.persistence.database import SQLiteDatabase
 from app.persistence.trial_repository import SQLiteTrialRepository
@@ -32,38 +31,81 @@ class BusinessAccessService:
         self._clock = clock
 
     def resolve(self, business_id: str) -> BusinessAccess:
+        return self._resolve(business_id, persist_expiry=True)
+
+    def resolve_read_only(self, business_id: str) -> BusinessAccess:
+        """Resolve current access without changing commercial state."""
+        return self._resolve(business_id, persist_expiry=False)
+
+    def require_execution(self, business_id: str) -> BusinessAccess:
+        access = self.resolve(business_id)
+        if not access.allowed:
+            raise BusinessAccessDenied(access.reason)
+        return access
+
+    def _resolve(
+        self,
+        business_id: str,
+        *,
+        persist_expiry: bool,
+    ) -> BusinessAccess:
         state = self._states.get(business_id)
         if state is None:
-            raise BusinessAccessDenied("Business commercial state is missing.")
+            raise BusinessAccessDenied(
+                "Business commercial state is missing."
+            )
 
         now = _aware_utc(self._clock)
         trial = self._trials.get(business_id)
 
         if state.status == CommercialStatus.TRIAL:
             if trial is None:
-                self._states.save(
-                    BusinessCommercialState(business_id, CommercialStatus.EXPIRED)
-                )
+                if persist_expiry:
+                    self._states.save(
+                        BusinessCommercialState(
+                            business_id,
+                            CommercialStatus.EXPIRED,
+                        )
+                    )
+
                 return BusinessAccess(
-                    business_id, CommercialStatus.EXPIRED, False,
-                    "Trial information is missing.", None,
+                    business_id,
+                    CommercialStatus.EXPIRED,
+                    False,
+                    "Trial information is missing.",
+                    None,
                 )
+
             if trial.is_expired(now):
-                self._states.save(
-                    BusinessCommercialState(business_id, CommercialStatus.EXPIRED)
-                )
+                if persist_expiry:
+                    self._states.save(
+                        BusinessCommercialState(
+                            business_id,
+                            CommercialStatus.EXPIRED,
+                        )
+                    )
+
                 return BusinessAccess(
-                    business_id, CommercialStatus.EXPIRED, False,
-                    "The trial has expired.", trial.ends_at,
+                    business_id,
+                    CommercialStatus.EXPIRED,
+                    False,
+                    "The trial has expired.",
+                    trial.ends_at,
                 )
+
             return BusinessAccess(
-                business_id, CommercialStatus.TRIAL, True,
-                "Trial access is active.", trial.ends_at,
+                business_id,
+                CommercialStatus.TRIAL,
+                True,
+                "Trial access is active.",
+                trial.ends_at,
             )
 
         if state.status == CommercialStatus.ACTIVE:
             return BusinessAccess(
-                business_id, CommercialStatus.ACTIVE, True,
+                business_id,
+                CommercialStatus.ACTIVE,
+                True,
                 "Business access is active.",
                 trial.ends_at if trial else None,
             )
@@ -76,18 +118,14 @@ class BusinessAccessService:
             trial.ends_at if trial else None,
         )
 
-    def require_execution(self, business_id: str) -> BusinessAccess:
-        access = self.resolve(business_id)
-        if not access.allowed:
-            raise BusinessAccessDenied(access.reason)
-        return access
-
 
 def _aware_utc(clock) -> datetime:
     try:
         value = clock(timezone.utc)
     except TypeError:
         value = clock()
+
     if value.tzinfo is None or value.utcoffset() is None:
         value = value.replace(tzinfo=timezone.utc)
+
     return value.astimezone(timezone.utc)

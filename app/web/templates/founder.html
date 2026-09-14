@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Founder Operations</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<main class="dashboard founder-dashboard">
+    <header>
+        <div>
+            <p class="eyebrow">AMINATION AI</p>
+            <h1>Founder Operations</h1>
+            <p class="muted">Platform visibility and operational evidence</p>
+        </div>
+        <button id="founder-logout" class="secondary">Sign out</button>
+    </header>
+
+    <section class="card">
+        <div class="founder-section-header">
+            <div>
+                <h2>Businesses</h2>
+                <p class="muted">Current business and commercial state from platform records.</p>
+            </div>
+            <button id="refresh-businesses" class="secondary">Refresh</button>
+        </div>
+
+        <p id="founder-error" class="error"></p>
+        <div id="businesses" class="founder-businesses"></div>
+    </section>
+
+    <section class="card">
+        <div class="founder-section-header">
+            <div>
+                <h2>Recent platform events</h2>
+                <p class="muted">Historical operational evidence recorded by the platform.</p>
+            </div>
+            <button id="refresh-events" class="secondary">Refresh</button>
+        </div>
+
+        <p id="events-error" class="error"></p>
+        <div id="events" class="founder-events"></div>
+    </section>
+</main>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+    wireFounderDashboard();
+</script>
+</body>
+</html>

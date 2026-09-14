@@ -21,6 +21,7 @@ from app.persistence.session import SQLiteSessionRepository
 from app.persistence.user_repository import SQLiteUserRepository
 from app.auth.rate_limit import SQLiteAuthenticationRateLimiter
 from app.founder.authorization import FounderAccessDenied, FounderAuthorizationService
+from app.founder.operations import FounderOperationsService
 from app.persistence.founder_repository import SQLiteFounderRepository
 from app.web.access import BusinessAccessDenied, BusinessAccessService
 from app.web.auth import SESSION_COOKIE, clear_session_cookie, install_auth_hooks, issue_csrf_cookie, login_required, require_csrf, set_session_cookie
@@ -56,6 +57,7 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     access = BusinessAccessService(db)
     founders = SQLiteFounderRepository(db)
     founder_access = FounderAuthorizationService(founders)
+    founder_operations = FounderOperationsService(db)
     builder = runtime_builder or _production_runtime_builder
 
     install_auth_hooks(app, auth_service)
@@ -64,6 +66,7 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     app.extensions["assistant_access"] = access
     app.extensions["assistant_founders"] = founders
     app.extensions["assistant_founder_access"] = founder_access
+    app.extensions["assistant_founder_operations"] = founder_operations
 
     @app.errorhandler(BusinessAccessDenied)
     def access_denied(exc):
@@ -103,11 +106,71 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     @login_required
     def founder_dashboard_page():
         founder_access.require_founder(g.principal)
+        return render_template("founder.html")
+
+
+    @app.get("/api/founder/businesses")
+    @login_required
+    def founder_businesses_api():
+        founder_access.require_founder(g.principal)
+
+        limit = _query_limit(
+            request.args.get("limit"),
+            default=FounderOperationsService.MAX_BUSINESSES,
+            maximum=FounderOperationsService.MAX_BUSINESSES,
+        )
+
+        businesses_view = founder_operations.list_businesses(limit)
 
         return jsonify(
             {
-                "message": "Founder Operations boundary active.",
-                "user_id": g.principal.user_id,
+                "businesses": [
+                    business.as_dict()
+                    for business in businesses_view
+                ]
+            }
+        )
+
+
+    @app.get("/api/founder/businesses/<business_id>")
+    @login_required
+    def founder_business_api(business_id: str):
+        founder_access.require_founder(g.principal)
+
+        business = founder_operations.get_business(business_id)
+
+        if business is None:
+            return jsonify({"error": "Business not found."}), 404
+
+        return jsonify(business.as_dict())
+
+
+    @app.get("/api/founder/events")
+    @login_required
+    def founder_events_api():
+        founder_access.require_founder(g.principal)
+
+        business_id = request.args.get("business_id")
+
+        if business_id is not None and not business_id.strip():
+            raise ValueError("business_id must be a non-empty string.")
+
+        if business_id is not None:
+            if businesses.get(business_id) is None:
+                return jsonify({"error": "Business not found."}), 404
+
+        limit = _query_limit(
+            request.args.get("limit"),
+            default=FounderOperationsService.MAX_EVENTS,
+            maximum=FounderOperationsService.MAX_EVENTS,
+        )
+
+        return jsonify(
+            {
+                "events": founder_operations.recent_events(
+                    business_id=business_id,
+                    limit=limit,
+                )
             }
         )
 
@@ -204,6 +267,33 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
 def _production_runtime_builder(business: Business) -> OrchestratorLike:
     from app.cli.assistant_factory import build_orchestrator_for_business
     return build_orchestrator_for_business(business)
+
+
+def _query_limit(
+    value: str | None,
+    *,
+    default: int,
+    maximum: int,
+) -> int:
+    if value is None:
+        return default
+
+    if not value.strip():
+        raise ValueError("limit must be a positive integer.")
+
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(
+            "limit must be a positive integer."
+        ) from exc
+
+    if parsed < 1 or parsed > maximum:
+        raise ValueError(
+            f"limit must be between 1 and {maximum}."
+        )
+
+    return parsed
 
 
 def _json_object() -> dict:

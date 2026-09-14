@@ -104,7 +104,7 @@ def test_active_founder_is_allowed(tmp_path):
     response = client.get("/founder")
 
     assert response.status_code == 200
-    assert response.get_json()["user_id"] == user.user_id
+    assert "Founder Operations" in response.get_data(as_text=True)
 
 
 def test_inactive_founder_is_denied(tmp_path):

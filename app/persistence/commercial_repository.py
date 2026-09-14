@@ -27,6 +27,36 @@ class SQLitePurchaseStore:
             ).fetchone()
         return _from_row(row) if row else None
 
+    def list_for_business(
+        self,
+        business_id: str,
+        limit: int = 100,
+    ) -> list[PurchaseRecord]:
+        if not isinstance(business_id, str) or not business_id.strip():
+            raise ValueError("business_id must be a non-empty string.")
+        if len(business_id) > 128:
+            raise ValueError(
+                "business_id exceeds the maximum allowed length."
+            )
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("limit must be an integer.")
+        if limit < 1 or limit > 500:
+            raise ValueError("limit must be between 1 and 500.")
+
+        with self._database.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM purchase_records
+                WHERE business_id = ?
+                ORDER BY paid_at DESC, provider_event_id DESC
+                LIMIT ?
+                """,
+                (business_id, limit),
+            ).fetchall()
+
+        return [_from_row(row) for row in rows]
+
     def save(self, record: PurchaseRecord) -> None:
         if not isinstance(record, PurchaseRecord):
             raise TypeError("record must be a PurchaseRecord.")
