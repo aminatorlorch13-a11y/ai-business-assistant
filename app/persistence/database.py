@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 5
 
 
 class SQLiteDatabase:
@@ -219,8 +219,206 @@ def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_v2_to_v3(connection: sqlite3.Connection) -> None:
+    """
+    Phase C WhatsApp identity and inbound-message persistence.
+
+    Sender identifiers are stored only as keyed hashes. Provider message IDs
+    are unique per provider/provider-account combination to provide durable
+    replay protection.
+    """
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS whatsapp_bindings (
+            binding_id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            provider_account_id TEXT NOT NULL,
+            sender_id_hash TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            business_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            active INTEGER NOT NULL CHECK(active IN (0, 1)),
+            FOREIGN KEY(user_id)
+                REFERENCES users(user_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(business_id)
+                REFERENCES businesses(business_id)
+                ON DELETE CASCADE,
+            UNIQUE(provider, provider_account_id, sender_id_hash)
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_bindings_business
+        ON whatsapp_bindings(business_id)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_bindings_user
+        ON whatsapp_bindings(user_id)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS whatsapp_inbound_messages (
+            provider TEXT NOT NULL,
+            provider_account_id TEXT NOT NULL,
+            provider_message_id TEXT NOT NULL,
+            sender_id_hash TEXT NOT NULL,
+            status TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            completed_at TEXT,
+            response_text TEXT,
+            error_code TEXT,
+            PRIMARY KEY(
+                provider,
+                provider_account_id,
+                provider_message_id
+            )
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_sender
+        ON whatsapp_inbound_messages(sender_id_hash)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_status
+        ON whatsapp_inbound_messages(status)
+        """
+    )
+
+
+def _migrate_v3_to_v4(connection: sqlite3.Connection) -> None:
+    """
+    Phase C WhatsApp conversation persistence.
+
+    Conversation history is scoped to the trusted WhatsApp binding so that
+    separate users/customers of the same business cannot share history.
+    """
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS whatsapp_conversation_turns (
+            binding_id TEXT NOT NULL,
+            business_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(binding_id, sequence),
+            FOREIGN KEY(binding_id)
+                REFERENCES whatsapp_bindings(binding_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(business_id)
+                REFERENCES businesses(business_id)
+                ON DELETE CASCADE,
+            CHECK(sequence > 0),
+            CHECK(role IN ('user', 'assistant')),
+            CHECK(length(content) > 0)
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_conversation_business_binding
+        ON whatsapp_conversation_turns(
+            business_id,
+            binding_id,
+            sequence
+        )
+        """
+    )
+
+
+def _migrate_v4_to_v5(connection: sqlite3.Connection) -> None:
+    """
+    Harden WhatsApp delivery durability.
+
+    Existing v4 rows are retained. New delivery metadata is nullable so
+    historical records remain readable and migration is non-destructive.
+    """
+
+    columns = {
+        row["name"]
+        for row in connection.execute(
+            "PRAGMA table_info(whatsapp_inbound_messages)"
+        ).fetchall()
+    }
+
+    additions = {
+        "business_id": "TEXT",
+        "binding_id": "TEXT",
+        "inbound_text": "TEXT",
+        "delivery_attempted_at": "TEXT",
+        "delivered_at": "TEXT",
+        "conversation_persisted_at": "TEXT",
+        "provider_response_message_id": "TEXT",
+    }
+
+    for name, definition in additions.items():
+        if name not in columns:
+            connection.execute(
+                f"ALTER TABLE whatsapp_inbound_messages "
+                f"ADD COLUMN {name} {definition}"
+            )
+
+    conversation_columns = {
+        row["name"]
+        for row in connection.execute(
+            "PRAGMA table_info(whatsapp_conversation_turns)"
+        ).fetchall()
+    }
+
+    if "exchange_id" not in conversation_columns:
+        connection.execute(
+            """
+            ALTER TABLE whatsapp_conversation_turns
+            ADD COLUMN exchange_id TEXT
+            """
+        )
+
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS
+        idx_whatsapp_conversation_exchange
+        ON whatsapp_conversation_turns(binding_id, exchange_id)
+        WHERE exchange_id IS NOT NULL
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_whatsapp_messages_delivery_state
+        ON whatsapp_inbound_messages(status)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_whatsapp_messages_business_binding
+        ON whatsapp_inbound_messages(business_id, binding_id)
+        """
+    )
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
+    3: _migrate_v3_to_v4,
+    4: _migrate_v4_to_v5,
 }
 
 # Backwards-compatible name for callers that imported SCHEMA.

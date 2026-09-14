@@ -160,17 +160,57 @@ def test_signup_rolls_back_everything_on_late_failure(tmp_path):
         assert connection.execute("SELECT COUNT(*) FROM commercial_states").fetchone()[0] == 0
 
 
-def test_schema_migrates_v1_to_v2(tmp_path):
+def test_schema_migrates_legacy_v1_to_current_schema(tmp_path):
     path = tmp_path / "assistant.sqlite3"
     connection = __import__("sqlite3").connect(path)
-    connection.executescript(__import__("app.persistence.database", fromlist=["BASE_SCHEMA"]).BASE_SCHEMA)
-    connection.execute("INSERT INTO persistence_metadata(key, value) VALUES('schema_version', '1')")
-    connection.commit(); connection.close()
+    connection.executescript(
+        __import__("app.persistence.database", fromlist=["BASE_SCHEMA"]).BASE_SCHEMA
+    )
+    connection.execute(
+        "INSERT INTO persistence_metadata(key, value) VALUES('schema_version', '1')"
+    )
+    connection.commit()
+    connection.close()
+
     database = SQLiteDatabase(path)
     database.initialize()
+
     with database.connection() as connection:
-        assert connection.execute("SELECT value FROM persistence_metadata WHERE key='schema_version'").fetchone()[0] == "2"
-        assert connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='credentials'").fetchone() is not None
+        assert (
+            connection.execute(
+                "SELECT value FROM persistence_metadata "
+                "WHERE key='schema_version'"
+            ).fetchone()[0]
+            == "5"
+        )
+
+        # v1 -> v2 migration
+        assert connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='credentials'"
+        ).fetchone() is not None
+
+        assert connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='auth_throttle_state'"
+        ).fetchone() is not None
+
+        # v2 -> v3 migration
+        assert connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='whatsapp_bindings'"
+        ).fetchone() is not None
+
+        assert connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='whatsapp_inbound_messages'"
+        ).fetchone() is not None
+
+        # v3 -> v4 migration
+        assert connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='whatsapp_conversation_turns'"
+        ).fetchone() is not None
 
 
 def test_session_expiration_invalidates_and_revokes(tmp_path):
