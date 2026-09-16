@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 9
 
 
 class SQLiteDatabase:
@@ -520,6 +520,401 @@ def _migrate_v6_to_v7(connection: sqlite3.Connection) -> None:
         """
     )
 
+
+def _migrate_v7_to_v8(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        CREATE TABLE safety_incidents (
+            incident_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL
+                CHECK(status IN (
+                    'open',
+                    'investigating',
+                    'resolved',
+                    'verified',
+                    'resume_authorized',
+                    'closed'
+                )),
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            created_by_user_id TEXT NOT NULL,
+            resolved_at TEXT,
+            resolved_by_user_id TEXT,
+            verification_notes TEXT,
+            verified_at TEXT,
+            verified_by_user_id TEXT,
+            resume_authorized_at TEXT,
+            resume_authorized_by_user_id TEXT,
+            closed_at TEXT,
+            closed_by_user_id TEXT,
+
+            FOREIGN KEY(created_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(resolved_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(verified_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(resume_authorized_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(closed_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            CHECK(
+                status = 'open'
+                OR (
+                    resolved_at IS NOT NULL
+                    AND resolved_by_user_id IS NOT NULL
+                )
+            ),
+
+            CHECK(
+                status NOT IN ('verified', 'resume_authorized', 'closed')
+                OR (
+                    verified_at IS NOT NULL
+                    AND verified_by_user_id IS NOT NULL
+                )
+            ),
+
+            CHECK(
+                status NOT IN ('resume_authorized', 'closed')
+                OR (
+                    resume_authorized_at IS NOT NULL
+                    AND resume_authorized_by_user_id IS NOT NULL
+                )
+            ),
+
+            CHECK(
+                status <> 'closed'
+                OR (
+                    closed_at IS NOT NULL
+                    AND closed_by_user_id IS NOT NULL
+                )
+            )
+        );
+
+        CREATE INDEX idx_safety_incidents_status_time
+            ON safety_incidents(status, created_at);
+
+        CREATE INDEX idx_safety_incidents_creator_time
+            ON safety_incidents(created_by_user_id, created_at);
+
+        CREATE TABLE safety_controls (
+            control_id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL
+                CHECK(scope IN (
+                    'global',
+                    'business',
+                    'capability',
+                    'channel',
+                    'integration'
+                )),
+            target TEXT NOT NULL,
+            state TEXT NOT NULL
+                CHECK(state IN ('active', 'halted')),
+            reason TEXT NOT NULL,
+            activated_at TEXT NOT NULL,
+            activated_by_user_id TEXT NOT NULL,
+            incident_id TEXT,
+            resolved_at TEXT,
+            resolved_by_user_id TEXT,
+            resumed_at TEXT,
+            resumed_by_user_id TEXT,
+
+            FOREIGN KEY(activated_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(resolved_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(resumed_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(incident_id)
+                REFERENCES safety_incidents(incident_id)
+                ON DELETE RESTRICT,
+
+            CHECK(
+                state = 'halted'
+                OR (
+                    resolved_at IS NOT NULL
+                    AND resolved_by_user_id IS NOT NULL
+                    AND resumed_at IS NOT NULL
+                    AND resumed_by_user_id IS NOT NULL
+                )
+            )
+        );
+
+        CREATE UNIQUE INDEX idx_safety_controls_active_target
+            ON safety_controls(scope, target)
+            WHERE state = 'halted';
+
+        CREATE INDEX idx_safety_controls_scope_target_state
+            ON safety_controls(scope, target, state);
+
+        CREATE INDEX idx_safety_controls_incident
+            ON safety_controls(incident_id);
+        """
+    )
+
+
+
+
+def _migrate_v8_to_v9(connection: sqlite3.Connection) -> None:
+    """
+    Rebuild the D5 safety tables with database constraints that match
+    the intended incident recovery lifecycle.
+
+    Existing safety incidents and controls are preserved.
+    """
+
+    connection.executescript(
+        """
+        CREATE TABLE safety_incidents_v9 (
+            incident_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL
+                CHECK(status IN (
+                    'open',
+                    'investigating',
+                    'resolved',
+                    'verified',
+                    'resume_authorized',
+                    'closed'
+                )),
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            created_by_user_id TEXT NOT NULL,
+            resolved_at TEXT,
+            resolved_by_user_id TEXT,
+            verification_notes TEXT,
+            verified_at TEXT,
+            verified_by_user_id TEXT,
+            resume_authorized_at TEXT,
+            resume_authorized_by_user_id TEXT,
+            closed_at TEXT,
+            closed_by_user_id TEXT,
+
+            FOREIGN KEY(created_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(resolved_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(verified_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(resume_authorized_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(closed_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            CHECK(
+                status IN ('open', 'investigating')
+                OR (
+                    resolved_at IS NOT NULL
+                    AND resolved_by_user_id IS NOT NULL
+                )
+            ),
+
+            CHECK(
+                status NOT IN (
+                    'verified',
+                    'resume_authorized',
+                    'closed'
+                )
+                OR (
+                    resolved_at IS NOT NULL
+                    AND resolved_by_user_id IS NOT NULL
+                    AND verified_at IS NOT NULL
+                    AND verified_by_user_id IS NOT NULL
+                )
+            ),
+
+            CHECK(
+                status NOT IN (
+                    'resume_authorized',
+                    'closed'
+                )
+                OR (
+                    resolved_at IS NOT NULL
+                    AND resolved_by_user_id IS NOT NULL
+                    AND verified_at IS NOT NULL
+                    AND verified_by_user_id IS NOT NULL
+                    AND resume_authorized_at IS NOT NULL
+                    AND resume_authorized_by_user_id IS NOT NULL
+                )
+            ),
+
+            CHECK(
+                status <> 'closed'
+                OR (
+                    resolved_at IS NOT NULL
+                    AND resolved_by_user_id IS NOT NULL
+                    AND verified_at IS NOT NULL
+                    AND verified_by_user_id IS NOT NULL
+                    AND resume_authorized_at IS NOT NULL
+                    AND resume_authorized_by_user_id IS NOT NULL
+                    AND closed_at IS NOT NULL
+                    AND closed_by_user_id IS NOT NULL
+                )
+            )
+        );
+
+        INSERT INTO safety_incidents_v9 (
+            incident_id,
+            status,
+            reason,
+            created_at,
+            created_by_user_id,
+            resolved_at,
+            resolved_by_user_id,
+            verification_notes,
+            verified_at,
+            verified_by_user_id,
+            resume_authorized_at,
+            resume_authorized_by_user_id,
+            closed_at,
+            closed_by_user_id
+        )
+        SELECT
+            incident_id,
+            status,
+            reason,
+            created_at,
+            created_by_user_id,
+            resolved_at,
+            resolved_by_user_id,
+            verification_notes,
+            verified_at,
+            verified_by_user_id,
+            resume_authorized_at,
+            resume_authorized_by_user_id,
+            closed_at,
+            closed_by_user_id
+        FROM safety_incidents;
+
+        CREATE TABLE safety_controls_v9 (
+            control_id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL
+                CHECK(scope IN (
+                    'global',
+                    'business',
+                    'capability',
+                    'channel',
+                    'integration'
+                )),
+            target TEXT NOT NULL,
+            state TEXT NOT NULL
+                CHECK(state IN ('active', 'halted')),
+            reason TEXT NOT NULL,
+            activated_at TEXT NOT NULL,
+            activated_by_user_id TEXT NOT NULL,
+            incident_id TEXT,
+            resolved_at TEXT,
+            resolved_by_user_id TEXT,
+            resumed_at TEXT,
+            resumed_by_user_id TEXT,
+
+            FOREIGN KEY(activated_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(resolved_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(resumed_by_user_id)
+                REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(incident_id)
+                REFERENCES safety_incidents_v9(incident_id)
+                ON DELETE RESTRICT,
+
+            CHECK(
+                state = 'halted'
+                OR (
+                    resolved_at IS NOT NULL
+                    AND resolved_by_user_id IS NOT NULL
+                    AND resumed_at IS NOT NULL
+                    AND resumed_by_user_id IS NOT NULL
+                )
+            )
+        );
+
+        INSERT INTO safety_controls_v9 (
+            control_id,
+            scope,
+            target,
+            state,
+            reason,
+            activated_at,
+            activated_by_user_id,
+            incident_id,
+            resolved_at,
+            resolved_by_user_id,
+            resumed_at,
+            resumed_by_user_id
+        )
+        SELECT
+            control_id,
+            scope,
+            target,
+            state,
+            reason,
+            activated_at,
+            activated_by_user_id,
+            incident_id,
+            resolved_at,
+            resolved_by_user_id,
+            resumed_at,
+            resumed_by_user_id
+        FROM safety_controls;
+
+        DROP TABLE safety_controls;
+        DROP TABLE safety_incidents;
+
+        ALTER TABLE safety_incidents_v9
+            RENAME TO safety_incidents;
+
+        ALTER TABLE safety_controls_v9
+            RENAME TO safety_controls;
+
+        CREATE INDEX idx_safety_incidents_status_time
+            ON safety_incidents(status, created_at);
+
+        CREATE INDEX idx_safety_incidents_creator_time
+            ON safety_incidents(created_by_user_id, created_at);
+
+        CREATE UNIQUE INDEX idx_safety_controls_active_target
+            ON safety_controls(scope, target)
+            WHERE state = 'halted';
+
+        CREATE INDEX idx_safety_controls_scope_target_state
+            ON safety_controls(scope, target, state);
+
+        CREATE INDEX idx_safety_controls_incident
+            ON safety_controls(incident_id);
+        """
+    )
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
@@ -527,6 +922,8 @@ MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     4: _migrate_v4_to_v5,
     5: _migrate_v5_to_v6,
     6: _migrate_v6_to_v7,
+    7: _migrate_v7_to_v8,
+    8: _migrate_v8_to_v9,
 }
 
 # Backwards-compatible name for callers that imported SCHEMA.

@@ -28,6 +28,9 @@ class AssistantOrchestrator:
         automation_context: AutomationContext | None = None,
         tenant: TenantContext | None = None,
         conversation_history: ConversationHistory | None = None,
+        *,
+        channel: str | None = None,
+        integration: str | None = None,
     ) -> AssistantResponse:
         """Process a message and execute its interpreted action."""
 
@@ -73,6 +76,18 @@ class AssistantOrchestrator:
                 "tenant must be a TenantContext or None."
             )
 
+        if channel is not None and (
+            not isinstance(channel, str) or not channel.strip()
+        ):
+            raise ValueError("channel must be a non-empty string when provided.")
+
+        if integration is not None and (
+            not isinstance(integration, str) or not integration.strip()
+        ):
+            raise ValueError(
+                "integration must be a non-empty string when provided."
+            )
+
         if (
             tenant is not None
             and tenant.business_id != message.business_id
@@ -97,16 +112,26 @@ class AssistantOrchestrator:
                 "AI interpretation action does not belong to this business."
             )
 
+        execution_context = {}
+
+        if channel is not None:
+            execution_context["channel"] = channel
+
+        if integration is not None:
+            execution_context["integration"] = integration
+
         if confirmed:
             result = self._executor.execute(
                 interpretation.action,
                 confirmed=True,
                 tenant=tenant,
+                **execution_context,
             )
         else:
             result = self._executor.execute(
                 interpretation.action,
                 tenant=tenant,
+                **execution_context,
             )
 
         return AssistantResponse(

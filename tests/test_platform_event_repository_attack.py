@@ -57,7 +57,7 @@ def make_event(
     )
 
 
-def test_database_schema_is_v7(tmp_path):
+def test_database_schema_matches_current_version(tmp_path):
     db = make_db(tmp_path)
 
     with db.connection() as connection:
@@ -69,7 +69,7 @@ def test_database_schema_is_v7(tmp_path):
             """
         ).fetchone()[0]
 
-    assert int(version) == SCHEMA_VERSION == 7
+    assert int(version) == SCHEMA_VERSION == 9
 
 
 def test_platform_events_table_exists(tmp_path):

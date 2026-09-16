@@ -214,6 +214,7 @@ class WhatsAppChannelService:
                 message=message,
                 tenant=tenant,
                 conversation_history=conversation_history,
+                channel="whatsapp",
             )
 
             if response.business_id != tenant.business_id:

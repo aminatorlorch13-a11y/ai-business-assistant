@@ -19,6 +19,10 @@ class SQLitePlatformEventRepository:
     MAX_ID_LENGTH = PlatformEvent.MAX_ID_LENGTH
     MAX_LIST_LIMIT = 500
 
+    @property
+    def database(self) -> SQLiteDatabase:
+        return self._database
+
     def __init__(self, database: SQLiteDatabase) -> None:
         if not isinstance(database, SQLiteDatabase):
             raise TypeError("database must be a SQLiteDatabase.")

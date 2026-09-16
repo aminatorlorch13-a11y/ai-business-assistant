@@ -14,6 +14,7 @@ from app.services.appointment_operation import AppointmentOperation
 from app.trust.action_policy import ActionPolicy
 
 
+from tests.test_safety_helpers import AllowAllTestSafetyEnforcement
 def make_business() -> Business:
     return Business(
         business_id="business-001",
@@ -46,6 +47,7 @@ def test_assistant_handles_create_appointment_end_to_end():
     executor = ActionExecutor(
         policy=policy,
         operation=operation,
+        safety_enforcement=AllowAllTestSafetyEnforcement(),
     )
 
     orchestrator = AssistantOrchestrator(
@@ -92,6 +94,7 @@ def test_assistant_handles_create_appointment_with_interpreting_ai_provider():
     executor = ActionExecutor(
         policy=policy,
         operation=operation,
+        safety_enforcement=AllowAllTestSafetyEnforcement(),
     )
 
     orchestrator = AssistantOrchestrator(

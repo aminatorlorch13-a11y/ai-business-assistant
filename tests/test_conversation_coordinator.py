@@ -4,20 +4,21 @@ import pytest
 
 from app.ai.contextual_provider import ContextualAIProvider
 from app.ai.provider import AIProvider
-from app.memory.context import MemoryContextBuilder, MemoryContext
+from app.assistant.action import AssistantAction
+from app.assistant.action_executor import ActionExecutor
 from app.assistant.conversation import (
     ConversationHistory,
     ConversationRole,
     ConversationTurn,
 )
-from app.assistant.action import AssistantAction
-from app.assistant.action_executor import ActionExecutor
+from app.assistant.intent import AssistantIntent
 from app.assistant.interpretation import AIInterpretation
 from app.assistant.interpretation_validator import AIInterpretationValidator
-from app.assistant.intent import AssistantIntent
 from app.assistant.orchestrator import AssistantOrchestrator
 from app.assistant.processor import AssistantProcessor
 from app.assistant.response import AssistantResponse
+from app.memory.context import MemoryContext
+from app.memory.context import MemoryContextBuilder
 from app.models.business import Business
 from app.models.voice import VoiceConfiguration
 from app.services.business_operation import BusinessOperation
@@ -26,6 +27,7 @@ from app.voice.conversation import ConversationState
 from app.voice.conversation_coordinator import (
     AssistantConversationCoordinator as _ProductionAssistantConversationCoordinator,
 )
+from tests.test_safety_helpers import AllowAllTestSafetyEnforcement
 from tests.runtime_support import make_runtime_dependencies
 
 
@@ -182,6 +184,7 @@ def make_action_executor():
     return ActionExecutor(
         policy=ActionPolicy(),
         operation=RecordingBusinessOperation(),
+        safety_enforcement=AllowAllTestSafetyEnforcement(),
     )
 
 
@@ -339,6 +342,7 @@ def test_failed_execution_does_not_record_conversation_history():
             super().__init__(
                 policy=ActionPolicy(),
                 operation=RecordingBusinessOperation(),
+                safety_enforcement=AllowAllTestSafetyEnforcement(),
             )
 
         def execute(self, action, confirmed=False, tenant=None):

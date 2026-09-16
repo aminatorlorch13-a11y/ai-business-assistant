@@ -5,6 +5,11 @@ from app.assistant.action import AssistantAction
 from app.assistant.action_executor import ActionExecutor
 from app.services.business_operation import BusinessOperation
 from app.trust.action_policy import ActionPolicy
+from tests.test_safety_helpers import AllowAllTestSafetyEnforcement
+
+
+def make_safety_enforcement():
+    return AllowAllTestSafetyEnforcement()
 
 
 def make_action(action_type: str) -> AssistantAction:
@@ -23,6 +28,7 @@ def test_executor_executes_permitted_action():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
     result = executor.execute(make_action("create"), confirmed=True)
@@ -38,6 +44,7 @@ def test_executor_allows_none_action():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
     result = executor.execute(make_action("none"))
@@ -52,6 +59,7 @@ def test_executor_rejects_forbidden_action():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
     with pytest.raises(PermissionError):
@@ -66,6 +74,7 @@ def test_executor_respects_disabled_create_permission():
     executor = ActionExecutor(
         policy=ActionPolicy(allow_create=False),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
     with pytest.raises(PermissionError):
@@ -80,6 +89,7 @@ def test_executor_respects_disabled_update_permission():
     executor = ActionExecutor(
         policy=ActionPolicy(allow_update=False),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
     with pytest.raises(PermissionError):
@@ -96,6 +106,7 @@ def test_executor_requires_confirmation_for_unsafe_action():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
         safety_policy=safety_policy,
     )
 
@@ -118,6 +129,7 @@ def test_executor_executes_action_when_confirmation_is_not_required():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
         safety_policy=safety_policy,
     )
 
@@ -137,6 +149,7 @@ def test_executor_rejects_non_action_input():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
     with pytest.raises(TypeError, match="AssistantAction"):
@@ -148,9 +161,10 @@ def test_executor_rejects_non_boolean_confirmation():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
-    with pytest.raises(TypeError, match="boolean"):
+    with pytest.raises(TypeError, match="confirmed must be a bool"):
         executor.execute(make_action("none"), confirmed="yes")
 
 
@@ -161,9 +175,10 @@ def test_executor_rejects_non_string_operation_result():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
-    with pytest.raises(TypeError, match="string result"):
+    with pytest.raises(TypeError, match="Business operation result must be a string"):
         executor.execute(make_action("none"))
 
 
@@ -174,6 +189,7 @@ def test_executor_rejects_empty_operation_result():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
     with pytest.raises(ValueError, match="empty result"):
@@ -188,6 +204,7 @@ def test_executor_rejects_action_for_wrong_tenant():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
     principal = AuthenticatedPrincipal(
@@ -226,6 +243,7 @@ def test_executor_forwards_authenticated_tenant_to_operation():
     executor = ActionExecutor(
         policy=ActionPolicy(),
         operation=operation,
+        safety_enforcement=make_safety_enforcement(),
     )
 
     principal = AuthenticatedPrincipal(

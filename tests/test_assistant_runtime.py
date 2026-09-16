@@ -1,13 +1,11 @@
 from __future__ import annotations
-from unittest.mock import Mock
 
-from app.memory.context import MemoryContextBuilder
-from app.memory.context import MemoryContext
+from unittest.mock import Mock
 
 import pytest
 
-from app.ai.provider import AIProvider
 from app.ai.context import AIContext
+from app.ai.provider import AIProvider
 from app.application.runtime import AssistantRuntime
 from app.application.runtime_factory import AssistantRuntimeFactory
 from app.assistant.action import AssistantAction
@@ -18,6 +16,8 @@ from app.assistant.interpretation_validator import AIInterpretationValidator
 from app.assistant.orchestrator import AssistantOrchestrator
 from app.assistant.processor import AssistantProcessor
 from app.assistant.response import AssistantResponse
+from app.memory.context import MemoryContext
+from app.memory.context import MemoryContextBuilder
 from app.models.business import Business
 from app.models.voice import VoiceConfiguration
 from app.services.business_operation import BusinessOperation
@@ -26,6 +26,7 @@ from app.voice.conversation import ConversationState
 from app.voice.conversation_coordinator import (
     AssistantConversationCoordinator as _ProductionAssistantConversationCoordinator,
 )
+from tests.test_safety_helpers import AllowAllTestSafetyEnforcement
 from tests.runtime_support import make_runtime_dependencies
 
 
@@ -274,6 +275,7 @@ def build_orchestrator(
             allow_delete=False,
         ),
         operation=operation,
+        safety_enforcement=AllowAllTestSafetyEnforcement(),
     )
 
     orchestrator = AssistantOrchestrator(

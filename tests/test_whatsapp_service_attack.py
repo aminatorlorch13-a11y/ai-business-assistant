@@ -351,6 +351,11 @@ def test_successful_message_reaches_core_once_and_is_delivered():
 
         assert result == "Your request was completed."
         handle.assert_called_once()
+
+        _, kwargs = handle.call_args
+        assert kwargs["channel"] == "whatsapp"
+        assert kwargs.get("integration") is None
+
         assert len(provider.calls) == 1
         assert provider.calls[0][0] == ACCOUNT_ID
         assert provider.calls[0][1] == SENDER_ID

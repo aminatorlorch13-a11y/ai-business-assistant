@@ -1,7 +1,7 @@
-from app.founder.authorization import FounderAuthorizationService
-from app.founder.models import FounderRecord
+"""Founder domain package.
 
-__all__ = [
-    "FounderAuthorizationService",
-    "FounderRecord",
-]
+Keep package initialization lightweight to avoid circular imports between
+Founder authorization and persistence modules.
+"""
+
+__all__ = []

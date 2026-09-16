@@ -15,13 +15,47 @@ from app.persistence.credential_repository import SQLiteCredentialRepository
 from app.persistence.membership_repository import SQLiteMembershipRepository
 
 class FakeOrchestrator:
-    def handle(self, message: AssistantMessage, confirmed: bool = False):
-        return AssistantResponse(message.business_id, "Configured Test Assistant", f"Received: {message.content}")
+    def __init__(self):
+        self.calls = []
+
+    def handle(
+        self,
+        message: AssistantMessage,
+        confirmed: bool = False,
+        *,
+        channel: str | None = None,
+        integration: str | None = None,
+    ):
+        self.calls.append(
+            {
+                "message": message,
+                "confirmed": confirmed,
+                "channel": channel,
+                "integration": integration,
+            }
+        )
+        return AssistantResponse(
+            message.business_id,
+            "Configured Test Assistant",
+            f"Received: {message.content}",
+        )
 
 
 def make_app(tmp_path):
     db = SQLiteDatabase(tmp_path / "assistant.sqlite3")
-    app = create_app(database=db, runtime_builder=lambda business: FakeOrchestrator(), testing=True)
+    orchestrators = []
+
+    def runtime_builder(business):
+        orchestrator = FakeOrchestrator()
+        orchestrators.append(orchestrator)
+        return orchestrator
+
+    app = create_app(
+        database=db,
+        runtime_builder=runtime_builder,
+        testing=True,
+    )
+    app.extensions["test_orchestrators"] = orchestrators
     return app, db
 
 
@@ -57,6 +91,12 @@ def test_signup_login_me_and_assistant_execution(tmp_path):
     response = client.post("/api/assistant/message", json={"message": "read the latest message"}, headers={"X-CSRF-Token": client.get_cookie("assistant_csrf").value})
     assert response.status_code == 200
     assert response.get_json()["message"] == "Received: read the latest message"
+
+    orchestrators = app.extensions["test_orchestrators"]
+    assert len(orchestrators) == 1
+    assert len(orchestrators[0].calls) == 1
+    assert orchestrators[0].calls[0]["channel"] == "web"
+    assert orchestrators[0].calls[0]["integration"] is None
 
 
 def test_owner_can_change_assistant_configuration(tmp_path):

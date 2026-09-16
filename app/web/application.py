@@ -256,7 +256,10 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
         text = _required(data, "message")
         if len(text) > 8000:
             return jsonify({"error": "Message is too long."}), 400
-        result = builder(business).handle(AssistantMessage(business.business_id, text))
+        result = builder(business).handle(
+            AssistantMessage(business.business_id, text),
+            channel="web",
+        )
         if not isinstance(result, AssistantResponse):
             return jsonify({"error": "Assistant returned an invalid response."}), 500
         return jsonify({"assistant_name": result.assistant_name, "message": result.message, "should_speak": result.should_speak})
