@@ -116,10 +116,6 @@ class SafetyControlService:
                 if incident is None:
                     raise SafetyControlError("Safety incident not found.")
 
-                if incident.created_by_user_id != founder.user_id:
-                    raise PermissionError(
-                        "Founder does not own the safety incident."
-                    )
 
                 if incident.status is not SafetyIncidentStatus.OPEN:
                     raise SafetyControlError(
@@ -175,10 +171,6 @@ class SafetyControlService:
         founder = self._founders.require_founder(principal)
         incident = self._require_incident(incident_id)
 
-        if incident.created_by_user_id != founder.user_id:
-            raise PermissionError(
-                "Founder does not own the safety incident."
-            )
 
         if incident.status is not SafetyIncidentStatus.OPEN:
             raise SafetyControlError(
@@ -226,10 +218,6 @@ class SafetyControlService:
         founder = self._founders.require_founder(principal)
         incident = self._require_incident(incident_id)
 
-        if incident.created_by_user_id != founder.user_id:
-            raise PermissionError(
-                "Founder does not own the safety incident."
-            )
 
         if incident.status is not SafetyIncidentStatus.INVESTIGATING:
             raise SafetyControlError(
@@ -287,10 +275,6 @@ class SafetyControlService:
         founder = self._founders.require_founder(principal)
         incident = self._require_incident(incident_id)
 
-        if incident.created_by_user_id != founder.user_id:
-            raise PermissionError(
-                "Founder does not own the safety incident."
-            )
 
         if incident.status is not SafetyIncidentStatus.RESOLVED:
             raise SafetyControlError(
@@ -345,10 +329,6 @@ class SafetyControlService:
         founder = self._founders.require_founder(principal)
         incident = self._require_incident(incident_id)
 
-        if incident.created_by_user_id != founder.user_id:
-            raise PermissionError(
-                "Founder does not own the safety incident."
-            )
 
         if incident.status is not SafetyIncidentStatus.VERIFIED:
             raise SafetyControlError(
@@ -411,10 +391,6 @@ class SafetyControlService:
                 "Only a halted safety control can be resumed."
             )
 
-        if control.activated_by_user_id != founder.user_id:
-            raise PermissionError(
-                "Founder does not own the safety control."
-            )
 
         incident = self._require_incident(control.incident_id)
 
@@ -481,10 +457,6 @@ class SafetyControlService:
         founder = self._founders.require_founder(principal)
         incident = self._require_incident(incident_id)
 
-        if incident.created_by_user_id != founder.user_id:
-            raise PermissionError(
-                "Founder does not own the safety incident."
-            )
 
         if incident.status is not SafetyIncidentStatus.RESUME_AUTHORIZED:
             raise SafetyControlError(
@@ -532,6 +504,10 @@ class SafetyControlService:
             except RuntimeError:
                 pass
             raise
+
+    @property
+    def database(self) -> SQLiteDatabase:
+        return self._database
 
     def _transaction(self) -> SQLiteSafetyTransaction:
         return SQLiteSafetyTransaction(self._database)

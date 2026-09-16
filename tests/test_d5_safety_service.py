@@ -9,7 +9,7 @@ from app.persistence.database import SQLiteDatabase
 from app.persistence.founder_repository import SQLiteFounderRepository
 from app.persistence.platform_event_repository import SQLitePlatformEventRepository
 from app.persistence.safety_repository import SQLiteSafetyRepository
-from app.safety.models import SafetyControlScope, SafetyIncidentStatus
+from app.safety.models import SafetyControlScope, SafetyControlState, SafetyIncidentStatus
 from app.safety.service import SafetyControlError, SafetyControlService
 import pytest
 
@@ -740,12 +740,12 @@ def test_resume_cannot_skip_verification(tmp_path):
         )
 
 
-def test_active_founder_can_only_resume_own_control(tmp_path):
+def test_active_founder_can_recover_control_created_by_another_founder(tmp_path):
     (
         db,
         service,
         _,
-        safety,
+        _safety,
         founder,
         _,
     ) = _setup(tmp_path)
@@ -762,7 +762,6 @@ def test_active_founder_can_only_resume_own_control(tmp_path):
                 "founder2@example.test",
             ),
         )
-
         connection.execute(
             """
             INSERT INTO platform_founders(user_id, active)
@@ -778,6 +777,7 @@ def test_active_founder_can_only_resume_own_control(tmp_path):
         session_id="founder-two-session",
     )
 
+    # Founder 1 creates the emergency control.
     control = service.halt(
         founder,
         scope=SafetyControlScope.GLOBAL,
@@ -785,37 +785,72 @@ def test_active_founder_can_only_resume_own_control(tmp_path):
         reason="Emergency halt",
     )
 
-    service.begin_investigation(
-        founder,
+    incident = service.begin_investigation(
+        other,
         control.incident_id,
     )
 
-    service.resolve_incident(
-        founder,
+    assert incident.status is SafetyIncidentStatus.INVESTIGATING
+    assert incident.created_by_user_id == "founder-1"
+
+    incident = service.resolve_incident(
+        other,
         control.incident_id,
-        notes="Fixed.",
+        notes="Fixed by Founder Two.",
     )
 
-    service.verify_fix(
-        founder,
+    assert incident.status is SafetyIncidentStatus.RESOLVED
+    assert incident.resolved_by_user_id == "founder-2"
+
+    incident = service.verify_fix(
+        other,
         control.incident_id,
-        notes="Verified.",
+        notes="Verified by Founder Two.",
     )
 
-    service.authorize_resume(
-        founder,
+    assert incident.status is SafetyIncidentStatus.VERIFIED
+    assert incident.verified_by_user_id == "founder-2"
+
+    incident = service.authorize_resume(
+        other,
         control.incident_id,
     )
 
-    with pytest.raises(PermissionError):
-        service.resume_control(
-            other,
-            control.control_id,
-        )
+    assert incident.status is SafetyIncidentStatus.RESUME_AUTHORIZED
+    assert incident.resume_authorized_by_user_id == "founder-2"
 
-    assert safety.get_control(control.control_id) is not None
+    resumed_control = service.resume_control(
+        other,
+        control.control_id,
+    )
 
+    assert resumed_control.state is SafetyControlState.ACTIVE
+    assert resumed_control.activated_by_user_id == "founder-1"
+    assert resumed_control.resumed_by_user_id == "founder-2"
 
+    incident = service.close_incident(
+        other,
+        control.incident_id,
+    )
+
+    assert incident.status is SafetyIncidentStatus.CLOSED
+    assert incident.closed_by_user_id == "founder-2"
+
+    # The original creator remains permanently recorded.
+    stored_incident = service._safety.get_incident(control.incident_id)
+    stored_control = service._safety.get_control(control.control_id)
+
+    assert stored_incident is not None
+    assert stored_control is not None
+
+    assert stored_incident.created_by_user_id == "founder-1"
+    assert stored_incident.resolved_by_user_id == "founder-2"
+    assert stored_incident.verified_by_user_id == "founder-2"
+    assert stored_incident.resume_authorized_by_user_id == "founder-2"
+    assert stored_incident.closed_by_user_id == "founder-2"
+
+    assert stored_control.activated_by_user_id == "founder-1"
+    assert stored_control.resumed_by_user_id == "founder-2"
 def test_founder_action_creates_audit_event(tmp_path):
     (
         _,
