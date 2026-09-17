@@ -12,8 +12,10 @@ from app.assistant.processor import AssistantProcessor
 from app.models.business import Business
 from app.models.voice import SUPPORTED_VOICES
 from app.persistence.database import SQLiteDatabase
+from app.persistence.platform_event_repository import SQLitePlatformEventRepository
 from app.persistence.safety_repository import SQLiteSafetyRepository
 from app.safety.enforcement import SafetyEnforcement
+from app.telemetry.platform_events import PlatformEventExecutionTelemetry
 from app.services.appointment_operation import AppointmentOperation
 from app.services.assistant_conversation_operation import (
     AssistantConversationOperation,
