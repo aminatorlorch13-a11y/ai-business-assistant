@@ -22,7 +22,13 @@ from app.persistence.user_repository import SQLiteUserRepository
 from app.auth.rate_limit import SQLiteAuthenticationRateLimiter
 from app.founder.authorization import FounderAccessDenied, FounderAuthorizationService
 from app.founder.operations import FounderOperationsService
+from app.founder.safety_operations import FounderSafetyOperationsService
 from app.persistence.founder_repository import SQLiteFounderRepository
+from app.persistence.platform_event_repository import SQLitePlatformEventRepository
+from app.persistence.safety_repository import SQLiteSafetyRepository
+from app.persistence.safety_transaction import SQLiteSafetyTransaction
+from app.safety.models import SafetyControlScope
+from app.safety.service import SafetyControlError, SafetyControlService
 from app.web.access import BusinessAccessDenied, BusinessAccessService
 from app.web.auth import SESSION_COOKIE, clear_session_cookie, install_auth_hooks, issue_csrf_cookie, login_required, require_csrf, set_session_cookie
 from app.web.security import WebSecurityError
@@ -58,6 +64,20 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     founders = SQLiteFounderRepository(db)
     founder_access = FounderAuthorizationService(founders)
     founder_operations = FounderOperationsService(db)
+
+    platform_events = SQLitePlatformEventRepository(db)
+    safety_repository = SQLiteSafetyRepository(db)
+    safety_service = SafetyControlService(
+        safety_repository=safety_repository,
+        founder_authorization=founder_access,
+        platform_events=platform_events,
+    )
+    founder_safety_operations = FounderSafetyOperationsService(
+        safety_repository=safety_repository,
+        safety_service=safety_service,
+        founder_authorization=founder_access,
+    )
+
     builder = runtime_builder or _production_runtime_builder
 
     install_auth_hooks(app, auth_service)
@@ -67,6 +87,9 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     app.extensions["assistant_founders"] = founders
     app.extensions["assistant_founder_access"] = founder_access
     app.extensions["assistant_founder_operations"] = founder_operations
+    app.extensions["assistant_safety_repository"] = safety_repository
+    app.extensions["assistant_safety_service"] = safety_service
+    app.extensions["assistant_founder_safety_operations"] = founder_safety_operations
 
     @app.errorhandler(BusinessAccessDenied)
     def access_denied(exc):
@@ -79,6 +102,12 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     @app.errorhandler(FounderAccessDenied)
     def founder_access_denied(exc):
         return jsonify({"error": str(exc)}), 403
+
+    @app.errorhandler(SafetyControlError)
+    def safety_control_error(exc):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": str(exc)}), 400
+        return "Bad request", 400
 
     @app.errorhandler(PermissionError)
     def permission_error(exc):
@@ -171,6 +200,335 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
                     business_id=business_id,
                     limit=limit,
                 )
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # Founder safety control plane
+    #
+    # These routes are intentionally thin. They authenticate the Founder,
+    # validate transport input, and delegate all safety lifecycle mutation
+    # to FounderSafetyOperationsService.
+    # ------------------------------------------------------------------
+
+    @app.get("/api/founder/safety/controls")
+    @login_required
+    def founder_safety_controls_api():
+        founder_access.require_founder(g.principal)
+
+        limit = _query_limit(
+            request.args.get("limit"),
+            default=FounderSafetyOperationsService.MAX_CONTROLS,
+            maximum=FounderSafetyOperationsService.MAX_CONTROLS,
+        )
+
+        controls = founder_safety_operations.list_active_controls(
+            g.principal,
+            limit=limit,
+        )
+
+        return jsonify(
+            {
+                "controls": [
+                    control.as_dict()
+                    if hasattr(control, "as_dict")
+                    else {
+                        "control_id": control.control_id,
+                        "scope": control.scope.value,
+                        "target": control.target,
+                        "state": control.state.value,
+                        "reason": control.reason,
+                        "activated_at": control.activated_at.isoformat(),
+                        "activated_by_user_id": control.activated_by_user_id,
+                        "incident_id": control.incident_id,
+                        "resolved_at": (
+                            control.resolved_at.isoformat()
+                            if control.resolved_at is not None
+                            else None
+                        ),
+                        "resolved_by_user_id": control.resolved_by_user_id,
+                        "resumed_at": (
+                            control.resumed_at.isoformat()
+                            if control.resumed_at is not None
+                            else None
+                        ),
+                        "resumed_by_user_id": control.resumed_by_user_id,
+                    }
+                    for control in controls
+                ]
+            }
+        )
+
+    @app.get("/api/founder/safety/controls/<control_id>")
+    @login_required
+    def founder_safety_control_api(control_id: str):
+        founder_access.require_founder(g.principal)
+
+        control = founder_safety_operations.get_control(
+            g.principal,
+            control_id,
+        )
+
+        if control is None:
+            return jsonify({"error": "Safety control not found."}), 404
+
+        return jsonify(
+            control.as_dict()
+            if hasattr(control, "as_dict")
+            else {
+                "control_id": control.control_id,
+                "scope": control.scope.value,
+                "target": control.target,
+                "state": control.state.value,
+                "reason": control.reason,
+                "activated_at": control.activated_at.isoformat(),
+                "activated_by_user_id": control.activated_by_user_id,
+                "incident_id": control.incident_id,
+                "resolved_at": (
+                    control.resolved_at.isoformat()
+                    if control.resolved_at is not None
+                    else None
+                ),
+                "resolved_by_user_id": control.resolved_by_user_id,
+                "resumed_at": (
+                    control.resumed_at.isoformat()
+                    if control.resumed_at is not None
+                    else None
+                ),
+                "resumed_by_user_id": control.resumed_by_user_id,
+            }
+        )
+
+    @app.get("/api/founder/safety/incidents/<incident_id>")
+    @login_required
+    def founder_safety_incident_api(incident_id: str):
+        founder_access.require_founder(g.principal)
+
+        incident = founder_safety_operations.get_incident(
+            g.principal,
+            incident_id,
+        )
+
+        if incident is None:
+            return jsonify({"error": "Safety incident not found."}), 404
+
+        return jsonify(
+            incident.as_dict()
+            if hasattr(incident, "as_dict")
+            else {
+                "incident_id": incident.incident_id,
+                "status": incident.status.value,
+                "reason": incident.reason,
+                "created_at": incident.created_at.isoformat(),
+                "created_by_user_id": incident.created_by_user_id,
+                "resolved_at": (
+                    incident.resolved_at.isoformat()
+                    if incident.resolved_at is not None
+                    else None
+                ),
+                "resolved_by_user_id": incident.resolved_by_user_id,
+                "verification_notes": incident.verification_notes,
+                "verified_at": (
+                    incident.verified_at.isoformat()
+                    if incident.verified_at is not None
+                    else None
+                ),
+                "verified_by_user_id": incident.verified_by_user_id,
+                "resume_authorized_at": (
+                    incident.resume_authorized_at.isoformat()
+                    if incident.resume_authorized_at is not None
+                    else None
+                ),
+                "resume_authorized_by_user_id": (
+                    incident.resume_authorized_by_user_id
+                ),
+                "closed_at": (
+                    incident.closed_at.isoformat()
+                    if incident.closed_at is not None
+                    else None
+                ),
+                "closed_by_user_id": incident.closed_by_user_id,
+            }
+        )
+
+    @app.post("/api/founder/safety/controls/halt")
+    @login_required
+    def founder_safety_halt_api():
+        require_csrf(request)
+        founder_access.require_founder(g.principal)
+
+        data = _json_object()
+
+        scope_value = data.get("scope")
+        target = data.get("target")
+        reason = data.get("reason")
+        incident_id = data.get("incident_id")
+
+        if not isinstance(scope_value, str) or not scope_value.strip():
+            raise ValueError("scope must be a non-empty string.")
+
+        try:
+            scope = SafetyControlScope(scope_value.strip().lower())
+        except ValueError as exc:
+            raise ValueError("scope must be a valid safety control scope.") from exc
+
+        result = founder_safety_operations.halt(
+            g.principal,
+            scope=scope,
+            target=target,
+            reason=reason,
+            incident_id=incident_id,
+        )
+
+        return jsonify(
+            result.as_dict()
+            if hasattr(result, "as_dict")
+            else {
+                "control_id": result.control_id,
+                "scope": result.scope.value,
+                "target": result.target,
+                "state": result.state.value,
+                "reason": result.reason,
+                "activated_at": result.activated_at.isoformat(),
+                "activated_by_user_id": result.activated_by_user_id,
+                "incident_id": result.incident_id,
+            }
+        ), 201
+
+    @app.post("/api/founder/safety/incidents/<incident_id>/investigate")
+    @login_required
+    def founder_safety_investigate_api(incident_id: str):
+        require_csrf(request)
+        founder_access.require_founder(g.principal)
+
+        incident = founder_safety_operations.begin_investigation(
+            g.principal,
+            incident_id,
+        )
+
+        return jsonify(
+            incident.as_dict()
+            if hasattr(incident, "as_dict")
+            else {
+                "incident_id": incident.incident_id,
+                "status": incident.status.value,
+            }
+        )
+
+    @app.post("/api/founder/safety/incidents/<incident_id>/resolve")
+    @login_required
+    def founder_safety_resolve_api(incident_id: str):
+        require_csrf(request)
+        founder_access.require_founder(g.principal)
+
+        data = _json_object()
+
+        incident = founder_safety_operations.resolve_incident(
+            g.principal,
+            incident_id,
+            notes=data.get("notes"),
+        )
+
+        return jsonify(
+            incident.as_dict()
+            if hasattr(incident, "as_dict")
+            else {
+                "incident_id": incident.incident_id,
+                "status": incident.status.value,
+            }
+        )
+
+    @app.post("/api/founder/safety/incidents/<incident_id>/verify")
+    @login_required
+    def founder_safety_verify_api(incident_id: str):
+        require_csrf(request)
+        founder_access.require_founder(g.principal)
+
+        data = _json_object()
+
+        incident = founder_safety_operations.verify_fix(
+            g.principal,
+            incident_id,
+            notes=data.get("notes"),
+        )
+
+        return jsonify(
+            incident.as_dict()
+            if hasattr(incident, "as_dict")
+            else {
+                "incident_id": incident.incident_id,
+                "status": incident.status.value,
+            }
+        )
+
+    @app.post(
+        "/api/founder/safety/incidents/<incident_id>/authorize-resume"
+    )
+    @login_required
+    def founder_safety_authorize_resume_api(incident_id: str):
+        require_csrf(request)
+        founder_access.require_founder(g.principal)
+
+        incident = founder_safety_operations.authorize_resume(
+            g.principal,
+            incident_id,
+        )
+
+        return jsonify(
+            incident.as_dict()
+            if hasattr(incident, "as_dict")
+            else {
+                "incident_id": incident.incident_id,
+                "status": incident.status.value,
+            }
+        )
+
+    @app.post("/api/founder/safety/controls/<control_id>/resume")
+    @login_required
+    def founder_safety_resume_control_api(control_id: str):
+        require_csrf(request)
+        founder_access.require_founder(g.principal)
+
+        control = founder_safety_operations.resume_control(
+            g.principal,
+            control_id,
+        )
+
+        return jsonify(
+            control.as_dict()
+            if hasattr(control, "as_dict")
+            else {
+                "control_id": control.control_id,
+                "scope": control.scope.value,
+                "target": control.target,
+                "state": control.state.value,
+                "incident_id": control.incident_id,
+                "resumed_at": (
+                    control.resumed_at.isoformat()
+                    if control.resumed_at is not None
+                    else None
+                ),
+                "resumed_by_user_id": control.resumed_by_user_id,
+            }
+        )
+
+    @app.post("/api/founder/safety/incidents/<incident_id>/close")
+    @login_required
+    def founder_safety_close_api(incident_id: str):
+        require_csrf(request)
+        founder_access.require_founder(g.principal)
+
+        incident = founder_safety_operations.close_incident(
+            g.principal,
+            incident_id,
+        )
+
+        return jsonify(
+            incident.as_dict()
+            if hasattr(incident, "as_dict")
+            else {
+                "incident_id": incident.incident_id,
+                "status": incident.status.value,
             }
         )
 
