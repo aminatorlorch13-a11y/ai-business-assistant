@@ -1,0 +1,17 @@
+from abc import ABC, abstractmethod
+
+from app.voice.request import SpeechRequest
+
+
+class SpeechEngine(ABC):
+    """Interface implemented by every speech engine."""
+
+    @abstractmethod
+    def speak(self, request: SpeechRequest) -> None:
+        """Speak the supplied speech request."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def cancel_current(self) -> None:
+        """Cancel the currently active speech output, if any."""
+        raise NotImplementedError
