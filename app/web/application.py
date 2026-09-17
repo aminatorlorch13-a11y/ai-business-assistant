@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import asdict
 from typing import Callable, Protocol
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for, g
@@ -21,6 +22,7 @@ from app.persistence.session import SQLiteSessionRepository
 from app.persistence.user_repository import SQLiteUserRepository
 from app.auth.rate_limit import SQLiteAuthenticationRateLimiter
 from app.founder.authorization import FounderAccessDenied, FounderAuthorizationService
+from app.founder.analytics import FounderAnalyticsService
 from app.founder.operations import FounderOperationsService
 from app.founder.safety_operations import FounderSafetyOperationsService
 from app.persistence.founder_repository import SQLiteFounderRepository
@@ -64,6 +66,7 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     founders = SQLiteFounderRepository(db)
     founder_access = FounderAuthorizationService(founders)
     founder_operations = FounderOperationsService(db)
+    founder_analytics = FounderAnalyticsService(db)
 
     platform_events = SQLitePlatformEventRepository(db)
     safety_repository = SQLiteSafetyRepository(db)
@@ -87,6 +90,7 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     app.extensions["assistant_founders"] = founders
     app.extensions["assistant_founder_access"] = founder_access
     app.extensions["assistant_founder_operations"] = founder_operations
+    app.extensions["assistant_founder_analytics"] = founder_analytics
     app.extensions["assistant_safety_repository"] = safety_repository
     app.extensions["assistant_safety_service"] = safety_service
     app.extensions["assistant_founder_safety_operations"] = founder_safety_operations
@@ -173,6 +177,13 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
 
         return jsonify(business.as_dict())
 
+
+    @app.get("/api/founder/analytics")
+    @login_required
+    def founder_analytics_api():
+        founder_access.require_founder(g.principal)
+        analytics = founder_analytics.summary()
+        return jsonify(asdict(analytics))
 
     @app.get("/api/founder/events")
     @login_required
