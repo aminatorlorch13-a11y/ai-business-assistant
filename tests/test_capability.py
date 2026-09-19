@@ -19,11 +19,15 @@ def make_request(
 
 def test_capability_values_are_stable():
     assert Capability.CONVERSATION.value == "conversation"
+    assert Capability.CALCULATOR.value == "calculator"
     assert Capability.TIME.value == "time"
     assert Capability.MEMORY.value == "memory"
     assert Capability.RESEARCH.value == "research"
+    assert Capability.MAPS.value == "maps"
+    assert Capability.CALENDAR.value == "calendar"
     assert Capability.AUTOMATION.value == "automation"
     assert Capability.COMMUNICATION.value == "communication"
+    assert Capability.BUSINESS_DATA.value == "business_data"
     assert Capability.VOICE.value == "voice"
 
 

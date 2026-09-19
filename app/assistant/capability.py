@@ -11,11 +11,15 @@ class Capability(str, Enum):
     """
 
     CONVERSATION = "conversation"
+    CALCULATOR = "calculator"
     TIME = "time"
     MEMORY = "memory"
     RESEARCH = "research"
+    MAPS = "maps"
+    CALENDAR = "calendar"
     AUTOMATION = "automation"
     COMMUNICATION = "communication"
+    BUSINESS_DATA = "business_data"
     VOICE = "voice"
 
 
