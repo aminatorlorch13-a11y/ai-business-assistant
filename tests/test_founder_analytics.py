@@ -44,6 +44,23 @@ def make_founder(db, user_id: str, active: bool = True) -> None:
     )
 
 
+def founder_login(client, db):
+    user = SQLiteUserRepository(db).get_by_email("owner@example.com")
+    assert user is not None
+
+    token = client.get_cookie("assistant_csrf").value
+    response = client.post(
+        "/api/auth/founder/login",
+        json={
+            "email": "owner@example.com",
+            "password": "correct horse battery staple",
+        },
+        headers={"X-CSRF-Token": token},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["scope"] == "platform"
+
+
 def test_founder_analytics_reports_authoritative_business_and_commercial_counts(
     tmp_path,
 ):
@@ -350,8 +367,11 @@ def test_founder_analytics_api_returns_authoritative_metrics(tmp_path):
 
     make_founder(db, user.user_id)
 
-
+    # Capture tenant context before switching to the platform Founder session.
     business_id = client.get("/api/me").get_json()["business_id"]
+
+    # Founder APIs require an explicit platform-level Founder session.
+    founder_login(client, db)
     SQLiteCommercialStateRepository(db).save(
         BusinessCommercialState(
             business_id=business_id,
@@ -388,7 +408,9 @@ def test_founder_analytics_api_exposes_uninstrumented_metrics_explicitly(
     assert user is not None
     make_founder(db, user.user_id)
 
+    # Capture tenant context before switching to the platform Founder session.
     business_id = client.get("/api/me").get_json()["business_id"]
+    founder_login(client, db)
     SQLiteCommercialStateRepository(db).save(
         BusinessCommercialState(
             business_id=business_id,
@@ -423,6 +445,7 @@ def test_founder_analytics_api_is_read_only(tmp_path):
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
     make_founder(db, user.user_id)
+    founder_login(client, db)
 
     with db.connection() as connection:
         before_counts = {

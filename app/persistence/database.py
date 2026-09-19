@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 class SQLiteDatabase:
@@ -915,6 +915,92 @@ def _migrate_v8_to_v9(connection: sqlite3.Connection) -> None:
         """
     )
 
+
+def _migrate_v9_to_v10(connection: sqlite3.Connection) -> None:
+    """Add explicit BUSINESS/PLATFORM scope to durable sessions.
+
+    Existing v9 sessions were necessarily business-scoped, so every migrated
+    row receives BUSINESS scope while preserving its tenant and role data.
+    The rebuilt table enforces valid scope combinations at the database
+    boundary.
+    """
+    connection.executescript(
+        """
+        CREATE TABLE sessions_v10 (
+            session_id_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            scope TEXT NOT NULL
+                CHECK(scope IN ('business', 'platform')),
+            business_id TEXT,
+            role TEXT,
+
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            revoked_at TEXT,
+
+            FOREIGN KEY(user_id)
+                REFERENCES users(user_id)
+                ON DELETE CASCADE,
+
+            FOREIGN KEY(business_id)
+                REFERENCES businesses(business_id)
+                ON DELETE CASCADE,
+
+            CHECK(
+                (
+                    scope = 'business'
+                    AND business_id IS NOT NULL
+                    AND role IN ('owner', 'admin', 'member')
+                )
+                OR
+                (
+                    scope = 'platform'
+                    AND business_id IS NULL
+                    AND role IS NULL
+                )
+            )
+        );
+
+        INSERT INTO sessions_v10 (
+            session_id_hash,
+            user_id,
+            scope,
+            business_id,
+            role,
+            created_at,
+            expires_at,
+            last_seen_at,
+            revoked_at
+        )
+        SELECT
+            session_id_hash,
+            user_id,
+            'business',
+            business_id,
+            role,
+            created_at,
+            expires_at,
+            last_seen_at,
+            revoked_at
+        FROM sessions;
+
+        DROP TABLE sessions;
+
+        ALTER TABLE sessions_v10
+            RENAME TO sessions;
+
+        CREATE INDEX idx_sessions_user
+            ON sessions(user_id);
+
+        CREATE INDEX idx_sessions_business
+            ON sessions(business_id);
+
+        CREATE INDEX idx_sessions_expires
+            ON sessions(expires_at);
+        """
+    )
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
@@ -924,6 +1010,7 @@ MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     6: _migrate_v6_to_v7,
     7: _migrate_v7_to_v8,
     8: _migrate_v8_to_v9,
+    9: _migrate_v9_to_v10,
 }
 
 # Backwards-compatible name for callers that imported SCHEMA.

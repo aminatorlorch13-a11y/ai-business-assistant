@@ -15,7 +15,7 @@ from app.assistant.interpretation_validator import AIInterpretationValidator
 from app.assistant.message import AssistantMessage
 from app.assistant.orchestrator import AssistantOrchestrator
 from app.assistant.processor import AssistantProcessor
-from app.identity.models import AuthenticatedPrincipal, UserRole
+from app.identity.models import AuthenticatedPrincipal, SessionScope, UserRole
 from app.memory.context import MemoryContext
 from app.memory.context import MemoryContextBuilder
 from app.persistence.business_repository import SQLiteBusinessRepository
@@ -127,9 +127,10 @@ def create_business(database: SQLiteDatabase) -> Business:
 def create_founder_principal() -> AuthenticatedPrincipal:
     return AuthenticatedPrincipal(
         user_id="founder-d5-runtime",
-        business_id="business-d5-runtime",
-        role=UserRole.OWNER,
+        business_id=None,
+        role=None,
         session_id="founder-d5-runtime-session",
+        scope=SessionScope.PLATFORM,
     )
 
 

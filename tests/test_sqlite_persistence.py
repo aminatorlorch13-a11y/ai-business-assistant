@@ -6,7 +6,7 @@ import pytest
 from app.commercial.purchase import VerifiedPurchase
 from app.commercial.purchase_record import PurchaseRecord
 from app.commercial.trial import BusinessTrial
-from app.identity import BusinessMembership, User, UserRole
+from app.identity import BusinessMembership, SessionScope, User, UserRole
 from app.models.business import Business
 from app.models.memory import Memory
 from app.persistence.business_repository import SQLiteBusinessRepository
@@ -97,12 +97,19 @@ def test_session_round_trip_and_immediate_revoke(tmp_path):
     db = make_database(tmp_path)
     SQLiteUserRepository(db).save(User("u", "Owner", "owner@example.com"))
     SQLiteBusinessRepository(db).save(make_business("b"))
-    session = SessionRecord("hash", "u", "b", UserRole.OWNER, NOW, NOW + timedelta(hours=1), NOW)
+    session = SessionRecord("hash", "u", SessionScope.BUSINESS, "b", UserRole.OWNER, NOW, NOW + timedelta(hours=1), NOW)
     repo = SQLiteSessionRepository(db)
-    assert repo.save(session) == session
+    repo.save(session)
     assert repo.get("hash") == session
-    assert repo.revoke("hash", NOW + timedelta(minutes=1)) is True
-    assert repo.revoke("hash", NOW + timedelta(minutes=2)) is False
+    repo.revoke("hash", NOW + timedelta(minutes=1))
+    revoked = repo.get("hash")
+    assert revoked is not None
+    assert revoked.revoked_at == NOW + timedelta(minutes=1)
+
+    repo.revoke("hash", NOW + timedelta(minutes=2))
+    revoked_again = repo.get("hash")
+    assert revoked_again is not None
+    assert revoked_again.revoked_at == NOW + timedelta(minutes=2)
 
 
 def test_purchase_history_survives_restart_and_is_unique(tmp_path):

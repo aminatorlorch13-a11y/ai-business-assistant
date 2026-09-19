@@ -5,7 +5,7 @@ import pytest
 
 from app.commercial.purchase import VerifiedPurchase
 from app.commercial.purchase_application import CommercialPurchaseService
-from app.identity import BusinessMembership, UserRole
+from app.identity import BusinessMembership, SessionScope, UserRole
 from app.models.business import Business
 from app.models.memory import Memory
 from app.persistence.business_repository import SQLiteBusinessRepository
@@ -53,7 +53,7 @@ def test_trial_parent_integrity_blocks_orphan_trial(tmp_path):
 
 def test_session_parent_integrity_blocks_orphan_session(tmp_path):
     db = make_db(tmp_path)
-    session = SessionRecord("hash", "u", "b", UserRole.OWNER, NOW, NOW, NOW)
+    session = SessionRecord("hash", "u", SessionScope.BUSINESS, "b", UserRole.OWNER, NOW, NOW, NOW)
     with pytest.raises(Exception):
         SQLiteSessionRepository(db).save(session)
 
@@ -72,3 +72,177 @@ def test_commercial_transaction_rolls_back_purchase_when_activation_fails(tmp_pa
     with db.connection() as connection:
         assert connection.execute("SELECT COUNT(*) FROM purchase_records").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM commercial_states").fetchone()[0] == 0
+
+
+def test_session_scope_constraints_reject_invalid_combinations(tmp_path):
+    db = make_db(tmp_path)
+
+    with db.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO users(user_id, display_name, email)
+            VALUES (?, ?, ?)
+            """,
+            ("scope-user", "Scope User", "scope-user@example.test"),
+        )
+        connection.execute(
+            """
+            INSERT INTO businesses(
+                business_id,
+                name,
+                owner_name,
+                assistant_name,
+                assistant_voice
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "scope-business",
+                "Scope Business",
+                "Scope Owner",
+                "Scope Assistant",
+                "calm",
+            ),
+        )
+
+        base = (
+            "scope-hash",
+            "scope-user",
+            "2026-01-01T12:00:00+00:00",
+            "2026-01-01T13:00:00+00:00",
+            "2026-01-01T12:00:00+00:00",
+        )
+
+        with pytest.raises(Exception):
+            connection.execute(
+                """
+                INSERT INTO sessions(
+                    session_id_hash,
+                    user_id,
+                    scope,
+                    business_id,
+                    role,
+                    created_at,
+                    expires_at,
+                    last_seen_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    base[0],
+                    base[1],
+                    "business",
+                    None,
+                    "owner",
+                    base[2],
+                    base[3],
+                    base[4],
+                ),
+            )
+
+        with pytest.raises(Exception):
+            connection.execute(
+                """
+                INSERT INTO sessions(
+                    session_id_hash,
+                    user_id,
+                    scope,
+                    business_id,
+                    role,
+                    created_at,
+                    expires_at,
+                    last_seen_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "scope-hash-platform-business",
+                    base[1],
+                    "platform",
+                    "scope-business",
+                    None,
+                    base[2],
+                    base[3],
+                    base[4],
+                ),
+            )
+
+        with pytest.raises(Exception):
+            connection.execute(
+                """
+                INSERT INTO sessions(
+                    session_id_hash,
+                    user_id,
+                    scope,
+                    business_id,
+                    role,
+                    created_at,
+                    expires_at,
+                    last_seen_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "scope-hash-platform-role",
+                    base[1],
+                    "platform",
+                    None,
+                    "owner",
+                    base[2],
+                    base[3],
+                    base[4],
+                ),
+            )
+
+        with pytest.raises(Exception):
+            connection.execute(
+                """
+                INSERT INTO sessions(
+                    session_id_hash,
+                    user_id,
+                    scope,
+                    business_id,
+                    role,
+                    created_at,
+                    expires_at,
+                    last_seen_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "scope-hash-business-role",
+                    base[1],
+                    "business",
+                    "scope-business",
+                    "invalid-role",
+                    base[2],
+                    base[3],
+                    base[4],
+                ),
+            )
+
+        connection.execute(
+            """
+            INSERT INTO sessions(
+                session_id_hash,
+                user_id,
+                scope,
+                business_id,
+                role,
+                created_at,
+                expires_at,
+                last_seen_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "scope-hash-valid-platform",
+                base[1],
+                "platform",
+                None,
+                None,
+                base[2],
+                base[3],
+                base[4],
+            ),
+        )

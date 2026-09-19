@@ -54,16 +54,19 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
     credentials = SQLiteCredentialRepository(db)
     memberships = SQLiteMembershipRepository(db)
     sessions = SQLiteSessionRepository(db)
+    founders = SQLiteFounderRepository(db)
+
     auth_service = AuthenticationService(
         users=users,
         credentials=credentials,
         memberships=memberships,
         sessions=sessions,
         rate_limiter=SQLiteAuthenticationRateLimiter(db),
+        founders=founders,
     )
+
     businesses = SQLiteBusinessRepository(db)
     access = BusinessAccessService(db)
-    founders = SQLiteFounderRepository(db)
     founder_access = FounderAuthorizationService(founders)
     founder_operations = FounderOperationsService(db)
     founder_analytics = FounderAnalyticsService(db)
@@ -576,6 +579,27 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
         except AuthenticationError:
             return jsonify({"error": "Authentication failed."}), 401
         return set_session_cookie(jsonify({"message": "Signed in.", "business_id": principal.business_id}), principal.session_id)
+
+    @app.post("/api/auth/founder/login")
+    def founder_login_api():
+        require_csrf(request)
+        data = _json_object()
+        try:
+            principal = auth_service.login_founder(
+                _required(data, "email"),
+                _required(data, "password"),
+                source_key="founder-web",
+            )
+        except AuthenticationError:
+            return jsonify({"error": "Authentication failed."}), 401
+
+        return set_session_cookie(
+            jsonify({
+                "message": "Founder signed in.",
+                "scope": principal.scope.value,
+            }),
+            principal.session_id,
+        )
 
     @app.post("/api/auth/logout")
     @login_required

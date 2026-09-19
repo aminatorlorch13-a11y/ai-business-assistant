@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.founder.models import FounderRecord
-from app.identity.models import AuthenticatedPrincipal
+from app.identity.models import AuthenticatedPrincipal, SessionScope
 from app.persistence.founder_repository import SQLiteFounderRepository
 
 
@@ -21,6 +21,9 @@ class FounderAuthorizationService:
     ) -> FounderRecord | None:
         if not isinstance(principal, AuthenticatedPrincipal):
             raise TypeError("principal must be an AuthenticatedPrincipal.")
+
+        if principal.scope is not SessionScope.PLATFORM:
+            return None
 
         founder = self._founders.get(principal.user_id)
 

@@ -4,7 +4,7 @@ from app.assistant.action_executor import ActionExecutor
 from app.safety.enforcement import SafetyEnforcement
 from app.trust.action_policy import ActionPolicy
 from app.services.business_operation import BusinessOperation
-from app.identity.models import AuthenticatedPrincipal, UserRole
+from app.identity.models import AuthenticatedPrincipal, SessionScope, UserRole
 from app.persistence.database import SQLiteDatabase
 from app.persistence.founder_repository import SQLiteFounderRepository
 from app.persistence.platform_event_repository import SQLitePlatformEventRepository
@@ -83,9 +83,10 @@ def _setup(tmp_path):
 
     founder = AuthenticatedPrincipal(
         user_id="founder-1",
-        business_id="platform",
-        role=UserRole.OWNER,
+        business_id=None,
+        role=None,
         session_id="founder-session",
+        scope=SessionScope.PLATFORM,
     )
 
     user = AuthenticatedPrincipal(
@@ -772,9 +773,10 @@ def test_active_founder_can_recover_control_created_by_another_founder(tmp_path)
 
     other = AuthenticatedPrincipal(
         user_id="founder-2",
-        business_id="platform",
-        role=UserRole.OWNER,
+        business_id=None,
+        role=None,
         session_id="founder-two-session",
+        scope=SessionScope.PLATFORM,
     )
 
     # Founder 1 creates the emergency control.

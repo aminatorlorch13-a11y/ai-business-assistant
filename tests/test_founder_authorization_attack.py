@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from app.auth.passwords import ScryptPasswordHasher
 from app.founder.authorization import FounderAccessDenied, FounderAuthorizationService
 from app.founder.models import FounderRecord
-from app.identity.models import AuthenticatedPrincipal, User, UserRole
+from app.identity.models import AuthenticatedPrincipal, SessionScope, User, UserRole
 from app.persistence.credential_repository import SQLiteCredentialRepository
 from app.persistence.database import SQLiteDatabase
 from app.persistence.founder_repository import SQLiteFounderRepository
@@ -89,7 +89,6 @@ def test_active_founder_is_allowed(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -101,11 +100,23 @@ def test_active_founder_is_allowed(tmp_path):
         )
     )
 
+    token = csrf(client)
+    response = client.post(
+        "/api/auth/founder/login",
+        json={
+            "email": "owner@example.com",
+            "password": "correct horse battery staple",
+        },
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["scope"] == "platform"
+
     response = client.get("/founder")
 
     assert response.status_code == 200
     assert "Founder Operations" in response.get_data(as_text=True)
-
 
 def test_inactive_founder_is_denied(tmp_path):
     app, db = make_app(tmp_path)
@@ -138,8 +149,9 @@ def test_unknown_user_is_denied_by_founder_service(tmp_path):
 
     principal = AuthenticatedPrincipal(
         user_id="unknown-user",
-        business_id="business-1",
-        role=UserRole.OWNER,
+        scope=SessionScope.PLATFORM,
+        business_id=None,
+        role=None,
         session_id="session-1",
     )
 
@@ -178,15 +190,20 @@ def test_forged_business_id_cannot_create_founder_authority(tmp_path):
 
     forged_principal = AuthenticatedPrincipal(
         user_id="real-user",
+        scope=SessionScope.BUSINESS,
         business_id="attacker-business",
         role=UserRole.OWNER,
         session_id="session-forged",
     )
 
-    resolved = service.require_founder(forged_principal)
+    assert service.resolve(forged_principal) is None
 
-    assert resolved.user_id == "real-user"
-    assert resolved.active is True
+    try:
+        service.require_founder(forged_principal)
+    except FounderAccessDenied:
+        pass
+    else:
+        raise AssertionError("A BUSINESS session must never create Founder authority.")
 
 
 def test_founder_authority_is_independent_of_tenant_role(tmp_path):
@@ -212,15 +229,15 @@ def test_founder_authority_is_independent_of_tenant_role(tmp_path):
         )
     )
 
-    for role in UserRole:
-        principal = AuthenticatedPrincipal(
-            user_id="founder-user",
-            business_id="business-1",
-            role=role,
-            session_id=f"session-{role.value}",
-        )
+    principal = AuthenticatedPrincipal(
+        user_id="founder-user",
+        scope=SessionScope.PLATFORM,
+        business_id=None,
+        role=None,
+        session_id="session-platform",
+    )
 
-        assert service.require_founder(principal).user_id == "founder-user"
+    assert service.require_founder(principal).user_id == "founder-user"
 
 
 def test_revoked_session_cannot_reach_founder_route(tmp_path):
@@ -228,7 +245,6 @@ def test_revoked_session_cannot_reach_founder_route(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -240,10 +256,21 @@ def test_revoked_session_cannot_reach_founder_route(tmp_path):
         )
     )
 
+    token = csrf(client)
+    response = client.post(
+        "/api/auth/founder/login",
+        json={
+            "email": "owner@example.com",
+            "password": "correct horse battery staple",
+        },
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["scope"] == "platform"
     assert client.get("/founder").status_code == 200
 
     csrf_token = client.get_cookie("assistant_csrf").value
-
     logout = client.post(
         "/api/auth/logout",
         headers={"X-CSRF-Token": csrf_token},
@@ -251,7 +278,6 @@ def test_revoked_session_cannot_reach_founder_route(tmp_path):
 
     assert logout.status_code == 200
     assert client.get("/founder").status_code == 401
-
 
 def test_founder_record_requires_existing_user(tmp_path):
     db = SQLiteDatabase(tmp_path / "assistant.sqlite3")

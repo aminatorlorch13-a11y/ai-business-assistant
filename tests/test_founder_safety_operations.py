@@ -6,7 +6,7 @@ import pytest
 
 from app.founder.authorization import FounderAuthorizationService
 from app.founder.safety_operations import FounderSafetyOperationsService
-from app.identity.models import AuthenticatedPrincipal, UserRole
+from app.identity.models import AuthenticatedPrincipal, SessionScope, UserRole
 from app.persistence.database import SQLiteDatabase
 from app.persistence.founder_repository import SQLiteFounderRepository
 from app.persistence.platform_event_repository import SQLitePlatformEventRepository
@@ -75,9 +75,10 @@ def _setup(tmp_path: Path):
 
     founder = AuthenticatedPrincipal(
         user_id="founder-1",
-        business_id="platform",
-        role=UserRole.OWNER,
+        business_id=None,
+        role=None,
         session_id="founder-session",
+        scope=SessionScope.PLATFORM,
     )
 
     normal_user = AuthenticatedPrincipal(

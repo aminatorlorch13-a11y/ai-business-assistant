@@ -67,6 +67,24 @@ def login(client):
     assert response.status_code == 200
 
 
+def founder_login(client, db):
+    user = SQLiteUserRepository(db).get_by_email("owner@example.com")
+    assert user is not None
+    make_founder(db, user.user_id)
+
+    token = csrf(client)
+    response = client.post(
+        "/api/auth/founder/login",
+        json={
+            "email": "owner@example.com",
+            "password": "correct horse battery staple",
+        },
+        headers={"X-CSRF-Token": token},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["scope"] == "platform"
+
+
 def make_founder(db, user_id, active=True):
     SQLiteFounderRepository(db).save(
         FounderRecord(
@@ -130,7 +148,7 @@ def test_active_founder_can_list_businesses_across_tenants(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -197,7 +215,7 @@ def test_business_detail_returns_404_for_unknown_business(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -213,7 +231,7 @@ def test_founder_business_detail_exposes_actual_commercial_state(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -242,7 +260,7 @@ def test_founder_business_user_count_is_actual(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -262,7 +280,7 @@ def test_founder_events_returns_recorded_events_only(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -287,7 +305,7 @@ def test_founder_events_can_filter_by_business(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -316,7 +334,7 @@ def test_unknown_business_event_filter_returns_404(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -345,7 +363,7 @@ def test_founder_invalid_limits_are_rejected(tmp_path, query):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -361,7 +379,7 @@ def test_blank_business_filter_is_rejected(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -411,6 +429,10 @@ def _setup_founder_safety_api(tmp_path, *, founder_active=True):
         user.user_id,
         active=founder_active,
     )
+
+    # Only an active Founder can establish a platform-level Founder session.
+    if founder_active:
+        founder_login(client, db)
 
     make_business(
         db,
@@ -978,7 +1000,7 @@ def test_founder_response_does_not_expose_password_hash(tmp_path):
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None
@@ -1011,7 +1033,7 @@ def test_founder_dashboard_read_is_non_mutating_for_commercial_state(
     client = app.test_client()
 
     signup(client)
-    login(client)
+    founder_login(client, db)
 
     user = SQLiteUserRepository(db).get_by_email("owner@example.com")
     assert user is not None

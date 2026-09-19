@@ -339,6 +339,7 @@ def test_attack_principal_has_only_expected_fields():
         "business_id",
         "role",
         "session_id",
+        "scope",
     }
 
 

@@ -53,12 +53,12 @@ def _index_names(db: SQLiteDatabase) -> set[str]:
     return {row[0] for row in rows}
 
 
-def test_fresh_database_initializes_at_schema_v9(tmp_path):
+def test_fresh_database_initializes_at_schema_v10(tmp_path):
     db = SQLiteDatabase(tmp_path / "fresh.db")
     db.initialize()
 
-    assert SCHEMA_VERSION == 9
-    assert _schema_version(db) == 9
+    assert SCHEMA_VERSION == 10
+    assert _schema_version(db) == 10
 
     assert _table_names(db) == {
         "safety_incidents",
@@ -66,7 +66,7 @@ def test_fresh_database_initializes_at_schema_v9(tmp_path):
     }
 
 
-def test_v7_database_migrates_to_v9_without_losing_existing_data(tmp_path):
+def test_v7_database_migrates_to_v10_without_losing_existing_data(tmp_path):
     db_path = tmp_path / "migration.db"
 
     db = SQLiteDatabase(db_path)
@@ -109,7 +109,7 @@ def test_v7_database_migrates_to_v9_without_losing_existing_data(tmp_path):
 
     db.initialize()
 
-    assert _schema_version(db) == 9
+    assert _schema_version(db) == 10
 
     assert _table_names(db) == {
         "safety_incidents",
@@ -215,7 +215,7 @@ def test_v8_to_v9_preserves_safety_incident_and_control_data(tmp_path):
 
     db.initialize()
 
-    assert _schema_version(db) == 9
+    assert _schema_version(db) == 10
 
     with db.connection() as connection:
         incident = connection.execute(
@@ -462,14 +462,14 @@ def test_halted_control_target_is_unique(tmp_path):
             )
 
 
-def test_v9_safety_tables_are_reused_on_restart(tmp_path):
+def test_current_safety_tables_are_reused_on_restart(tmp_path):
     db = SQLiteDatabase(tmp_path / "restart.db")
     db.initialize()
 
     reopened = SQLiteDatabase(tmp_path / "restart.db")
     reopened.initialize()
 
-    assert _schema_version(reopened) == 9
+    assert _schema_version(reopened) == 10
 
     assert _table_names(reopened) == {
         "safety_incidents",
