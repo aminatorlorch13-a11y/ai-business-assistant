@@ -9,6 +9,9 @@ from app.assistant.execution import (
 from app.safety.enforcement import SafetyEnforcement
 from app.trust.capability_executor import CapabilityExecutor
 from app.trust.capability_policy import CapabilityPolicy
+from app.trust.capability_role_policy import CapabilityRoleOperationPolicy
+from app.identity.models import AuthenticatedPrincipal, UserRole
+from app.identity.tenant import TenantContext
 from tests.test_safety_helpers import AllowAllTestSafetyEnforcement
 
 
@@ -43,6 +46,33 @@ def make_policy(
     return CapabilityPolicy(
         business_id=BUSINESS_ID,
         allowed_capabilities=allowed_capabilities,
+    )
+
+
+def make_role_policy() -> CapabilityRoleOperationPolicy:
+    return CapabilityRoleOperationPolicy(
+        allowed_operations_by_role={
+            UserRole.OWNER: {
+                Capability.CONVERSATION: frozenset({"respond"}),
+                Capability.RESEARCH: frozenset({"respond"}),
+            },
+        }
+    )
+
+
+def make_tenant(
+    role: UserRole = UserRole.OWNER,
+    business_id: str = BUSINESS_ID,
+) -> TenantContext:
+    principal = AuthenticatedPrincipal(
+        user_id="user-001",
+        business_id=business_id,
+        role=role,
+        session_id="session-001",
+    )
+    return TenantContext(
+        business_id=business_id,
+        principal=principal,
     )
 
 
@@ -99,6 +129,7 @@ def make_executor(
 ) -> CapabilityExecutor:
     return CapabilityExecutor(
         policy=make_policy(allowed_capabilities),
+        role_policy=make_role_policy(),
         router=make_router(
             calls=calls,
             result_capability=result_capability,
@@ -122,7 +153,7 @@ def test_executor_authorizes_before_routing():
     )
 
     request = make_request()
-    result = executor.execute(request)
+    result = executor.execute(request, tenant=make_tenant())
 
     assert isinstance(result, CapabilityExecutionResult)
     assert result.success is True
@@ -141,7 +172,7 @@ def test_executor_denies_unauthorized_capability():
     )
 
     with pytest.raises(PermissionError, match="not permitted"):
-        executor.execute(make_request(Capability.RESEARCH))
+        executor.execute(make_request(Capability.RESEARCH), tenant=make_tenant())
 
     assert calls == []
 
@@ -155,7 +186,7 @@ def test_denied_capability_never_reaches_handler():
     )
 
     with pytest.raises(PermissionError):
-        executor.execute(make_request())
+        executor.execute(make_request(), tenant=make_tenant())
 
     assert calls == []
 
@@ -172,7 +203,8 @@ def test_cross_business_request_is_denied_before_routing():
         executor.execute(
             make_request(
                 business_id="business-999",
-            )
+            ),
+            tenant=make_tenant(),
         )
 
     assert calls == []
@@ -189,7 +221,7 @@ def test_executor_rejects_invalid_request(request_value):
         TypeError,
         match="CapabilityExecutionRequest",
     ):
-        executor.execute(request_value)
+        executor.execute(request_value, tenant=make_tenant())
 
 
 @pytest.mark.parametrize(
@@ -203,6 +235,7 @@ def test_executor_rejects_invalid_policy(policy_value):
     ):
         CapabilityExecutor(
             policy=policy_value,
+            role_policy=make_role_policy(),
             router=make_router(),
             safety_enforcement=AllowAllTestSafetyEnforcement(),
         )
@@ -219,6 +252,7 @@ def test_executor_rejects_invalid_router(router_value):
     ):
         CapabilityExecutor(
             policy=make_policy(),
+            role_policy=make_role_policy(),
             router=router_value,
             safety_enforcement=AllowAllTestSafetyEnforcement(),
         )
@@ -235,6 +269,7 @@ def test_executor_rejects_invalid_safety_enforcement(safety_value):
     ):
         CapabilityExecutor(
             policy=make_policy(),
+            role_policy=make_role_policy(),
             router=make_router(),
             safety_enforcement=safety_value,
         )
@@ -250,7 +285,7 @@ def test_executor_rejects_result_with_wrong_capability():
         ValueError,
         match="result does not match the request capability",
     ):
-        executor.execute(make_request())
+        executor.execute(make_request(), tenant=make_tenant())
 
 
 def test_executor_rejects_result_with_wrong_operation():
@@ -263,7 +298,7 @@ def test_executor_rejects_result_with_wrong_operation():
         ValueError,
         match="result does not match the request operation",
     ):
-        executor.execute(make_request())
+        executor.execute(make_request(), tenant=make_tenant())
 
 
 def test_executor_rejects_result_from_wrong_business():
@@ -276,7 +311,7 @@ def test_executor_rejects_result_from_wrong_business():
         ValueError,
         match="result does not belong to the request business",
     ):
-        executor.execute(make_request())
+        executor.execute(make_request(), tenant=make_tenant())
 
 
 def test_executor_passes_channel_to_safety_boundary():
@@ -292,7 +327,10 @@ def test_executor_passes_channel_to_safety_boundary():
         safety_enforcement=safety,
     )
 
-    executor.execute(make_request(channel="web"))
+    executor.execute(
+        make_request(channel="web"),
+        tenant=make_tenant(),
+    )
 
     assert safety.channels == ["web"]
 
@@ -313,7 +351,8 @@ def test_executor_passes_integration_to_safety_boundary():
     executor.execute(
         make_request(
             integration="calendar",
-        )
+        ),
+        tenant=make_tenant(),
     )
 
     assert safety.integrations == ["calendar"]
@@ -332,7 +371,7 @@ def test_executor_checks_execution_safety_before_routing():
     )
 
     with pytest.raises(PermissionError, match="execution halted"):
-        executor.execute(make_request())
+        executor.execute(make_request(), tenant=make_tenant())
 
     assert calls == []
 
@@ -350,7 +389,7 @@ def test_executor_checks_capability_safety_before_routing():
     )
 
     with pytest.raises(PermissionError, match="capability halted"):
-        executor.execute(make_request())
+        executor.execute(make_request(), tenant=make_tenant())
 
     assert calls == []
 
@@ -368,7 +407,10 @@ def test_executor_checks_channel_safety_before_routing():
     )
 
     with pytest.raises(PermissionError, match="channel halted"):
-        executor.execute(make_request(channel="web"))
+        executor.execute(
+        make_request(channel="web"),
+        tenant=make_tenant(),
+    )
 
     assert calls == []
 
@@ -386,6 +428,9 @@ def test_executor_checks_integration_safety_before_routing():
     )
 
     with pytest.raises(PermissionError, match="integration halted"):
-        executor.execute(make_request(integration="calendar"))
+        executor.execute(
+            make_request(integration="calendar"),
+            tenant=make_tenant(),
+        )
 
     assert calls == []
