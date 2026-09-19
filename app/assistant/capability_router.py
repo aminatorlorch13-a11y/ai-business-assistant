@@ -1,92 +1,149 @@
-from collections.abc import Mapping
-from typing import Callable
+from __future__ import annotations
 
-from app.assistant.capability import (
-    Capability,
-    CapabilityRequest,
-    CapabilityResult,
+from collections.abc import Callable, Mapping
+
+from app.assistant.capability import Capability
+from app.assistant.execution import (
+    CapabilityExecutionRequest,
+    CapabilityExecutionResult,
 )
 
 
-CapabilityHandler = Callable[[CapabilityRequest], CapabilityResult]
+CapabilityHandler = Callable[
+    [CapabilityExecutionRequest],
+    CapabilityExecutionResult,
+]
 
 
 class CapabilityRouter:
     """
-    Routes authorized high-level capability requests to handlers.
+    Deterministic registry and router for concrete capability operations.
 
-    The router deliberately knows nothing about:
-    - email
-    - WhatsApp
-    - Facebook
-    - web browsers
-    - databases
-    - voice engines
-
-    Those concerns belong behind capability-specific services.
+    The router knows which operations are registered and how to dispatch
+    them. It does not perform entitlement, authorization, safety,
+    confirmation, or AI reasoning.
     """
 
     def __init__(
         self,
-        handlers: Mapping[Capability, CapabilityHandler],
+        handlers: Mapping[
+            Capability,
+            Mapping[str, CapabilityHandler],
+        ],
     ) -> None:
         if not isinstance(handlers, Mapping):
             raise TypeError("handlers must be a mapping.")
 
-        normalized_handlers = dict(handlers)
+        normalized: dict[
+            Capability,
+            dict[str, CapabilityHandler],
+        ] = {}
 
-        for capability, handler in normalized_handlers.items():
+        for capability, operations in handlers.items():
             if not isinstance(capability, Capability):
                 raise TypeError(
                     "handler keys must be Capability values."
                 )
 
-            if not callable(handler):
+            if not isinstance(operations, Mapping):
                 raise TypeError(
-                    "each capability handler must be callable."
+                    "operations for each capability must be a mapping."
                 )
 
-        self._handlers = normalized_handlers
+            normalized_operations: dict[str, CapabilityHandler] = {}
+
+            for operation, handler in operations.items():
+                if not isinstance(operation, str):
+                    raise TypeError(
+                        "operation names must be strings."
+                    )
+
+                operation = operation.strip()
+
+                if not operation:
+                    raise ValueError(
+                        "operation names must be non-empty strings."
+                    )
+
+                if not callable(handler):
+                    raise TypeError(
+                        "capability operation handlers must be callable."
+                    )
+
+                normalized_operations[operation] = handler
+
+            normalized[capability] = normalized_operations
+
+        self._handlers = normalized
 
     def supports(self, capability: Capability) -> bool:
-        """
-        Return whether a capability currently has a handler.
-        """
         if not isinstance(capability, Capability):
             raise TypeError("capability must be a Capability.")
 
         return capability in self._handlers
 
-    def route(self, request: CapabilityRequest) -> CapabilityResult:
-        """
-        Route a validated capability request to its registered handler.
+    def supports_operation(
+        self,
+        capability: Capability,
+        operation: str,
+    ) -> bool:
+        if not isinstance(capability, Capability):
+            raise TypeError("capability must be a Capability.")
 
-        Handler output is validated at the router boundary so arbitrary
-        objects cannot silently enter the assistant pipeline.
-        """
-        if not isinstance(request, CapabilityRequest):
-            raise TypeError(
-                "request must be a CapabilityRequest."
+        if not isinstance(operation, str):
+            raise TypeError("operation must be a string.")
+
+        operation = operation.strip()
+
+        if not operation:
+            raise ValueError(
+                "operation must be a non-empty string."
             )
 
-        handler = self._handlers.get(request.capability)
+        return operation in self._handlers.get(capability, {})
+
+    def route(
+        self,
+        request: CapabilityExecutionRequest,
+    ) -> CapabilityExecutionResult:
+        if not isinstance(request, CapabilityExecutionRequest):
+            raise TypeError(
+                "request must be a CapabilityExecutionRequest."
+            )
+
+        operations = self._handlers.get(request.capability)
+
+        if operations is None:
+            raise LookupError(
+                f"No handlers registered for capability "
+                f"'{request.capability.value}'."
+            )
+
+        handler = operations.get(request.operation)
 
         if handler is None:
             raise LookupError(
-                f"No handler registered for capability "
+                f"No handler registered for operation "
+                f"'{request.operation}' under capability "
                 f"'{request.capability.value}'."
             )
 
         result = handler(request)
 
-        if not isinstance(result, CapabilityResult):
+        if not isinstance(result, CapabilityExecutionResult):
             raise TypeError(
-                "capability handler must return a CapabilityResult."
+                "capability operation handler must return a "
+                "CapabilityExecutionResult."
             )
 
         if result.capability is not request.capability:
             raise ValueError(
                 "Capability result does not match the request capability."
+            )
+
+        if result.operation != request.operation:
+            raise ValueError(
+                "Capability result does not match the request operation."
             )
 
         if result.business_id != request.business_id:

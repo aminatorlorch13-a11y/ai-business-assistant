@@ -67,6 +67,19 @@ class CapabilityPolicy:
             allowed_capabilities=entitlements.capabilities,
         )
 
+    def allows_capability(self, capability: Capability) -> bool:
+        """
+        Return whether this business is authorized to execute a capability.
+
+        Authorization is limited to business identity and explicit
+        commercially entitled capabilities. Operation selection belongs
+        to the capability registry/router.
+        """
+        if not isinstance(capability, Capability):
+            raise TypeError("capability must be a Capability.")
+
+        return capability in self.allowed_capabilities
+
     def allows(self, request: CapabilityRequest) -> bool:
         """
         Return whether this policy authorizes the requested capability.
@@ -84,4 +97,4 @@ class CapabilityPolicy:
         if request.business_id != self.business_id:
             return False
 
-        return request.capability in self.allowed_capabilities
+        return self.allows_capability(request.capability)
