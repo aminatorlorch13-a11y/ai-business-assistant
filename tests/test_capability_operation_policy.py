@@ -17,6 +17,12 @@ def make_policy() -> CapabilityOperationPolicy:
                 "update_event": True,
                 "delete_event": True,
             },
+            Capability.MEMORY: {
+                "save": False,
+                "get": False,
+                "list": False,
+                "delete": True,
+            },
         }
     )
 
@@ -147,6 +153,25 @@ def test_policy_rejects_invalid_confirmation_value():
                 }
             }
         )
+
+
+@pytest.mark.parametrize("operation", ["save", "get", "list"])
+def test_memory_non_destructive_operations_do_not_require_confirmation(operation):
+    policy = make_policy()
+
+    assert policy.requires_confirmation(
+        Capability.MEMORY,
+        operation,
+    ) is False
+
+
+def test_memory_delete_requires_confirmation():
+    policy = make_policy()
+
+    assert policy.requires_confirmation(
+        Capability.MEMORY,
+        "delete",
+    ) is True
 
 
 def test_policy_does_not_use_ai_reversible_flag():

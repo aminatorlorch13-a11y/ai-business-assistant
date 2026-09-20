@@ -19,6 +19,12 @@ def make_policy() -> CapabilityRoleOperationPolicy:
                     "update_event",
                     "delete_event",
                 }),
+                Capability.MEMORY: frozenset({
+                    "save",
+                    "get",
+                    "list",
+                    "delete",
+                }),
             },
             UserRole.ADMIN: {
                 Capability.CALCULATOR: frozenset({"calculate"}),
@@ -27,9 +33,20 @@ def make_policy() -> CapabilityRoleOperationPolicy:
                     "update_event",
                     "delete_event",
                 }),
+                Capability.MEMORY: frozenset({
+                    "save",
+                    "get",
+                    "list",
+                    "delete",
+                }),
             },
             UserRole.MEMBER: {
                 Capability.CALCULATOR: frozenset({"calculate"}),
+                Capability.MEMORY: frozenset({
+                    "save",
+                    "get",
+                    "list",
+                }),
             },
         }
     )
@@ -124,12 +141,52 @@ def test_unknown_operation_is_denied():
     ) is False
 
 
-def test_unknown_capability_is_denied():
+def test_unknown_memory_operation_is_denied():
     assert make_policy().allows(
         make_tenant(UserRole.OWNER),
         make_request(
             capability=Capability.MEMORY,
             operation="remember",
+        ),
+    ) is False
+
+
+@pytest.mark.parametrize("role", [
+    UserRole.OWNER,
+    UserRole.ADMIN,
+    UserRole.MEMBER,
+])
+@pytest.mark.parametrize("operation", ["save", "get", "list"])
+def test_memory_read_write_operations_are_authorized_for_all_business_roles(
+    role,
+    operation,
+):
+    assert make_policy().allows(
+        make_tenant(role),
+        make_request(
+            capability=Capability.MEMORY,
+            operation=operation,
+        ),
+    ) is True
+
+
+@pytest.mark.parametrize("role", [UserRole.OWNER, UserRole.ADMIN])
+def test_memory_delete_is_authorized_for_owner_and_admin(role):
+    assert make_policy().allows(
+        make_tenant(role),
+        make_request(
+            capability=Capability.MEMORY,
+            operation="delete",
+        ),
+    ) is True
+
+
+def test_memory_delete_is_denied_for_member():
+    assert make_policy().allows(
+        make_tenant(UserRole.MEMBER),
+        make_request(
+            capability=Capability.MEMORY,
+            operation="delete",
         ),
     ) is False
 
