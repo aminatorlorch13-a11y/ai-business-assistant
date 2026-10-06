@@ -395,6 +395,42 @@ def test_router_rejects_result_for_wrong_operation():
         router.route(make_request())
 
 
+
+def test_router_isolated_from_mutation_of_original_handler_mapping():
+    calls = []
+
+    def original_handler(request):
+        calls.append("original")
+        return make_result(request)
+
+    def replacement_handler(request):
+        calls.append("replacement")
+        return make_result(request)
+
+    operations = {
+        "search": original_handler,
+    }
+    handlers = {
+        Capability.RESEARCH: operations,
+    }
+
+    router = CapabilityRouter(handlers)
+
+    operations["search"] = replacement_handler
+    handlers[Capability.RESEARCH]["delete"] = replacement_handler
+
+    result = router.route(
+        make_request(Capability.RESEARCH, "search")
+    )
+
+    assert result.success is True
+    assert calls == ["original"]
+    assert router.supports_operation(
+        Capability.RESEARCH,
+        "delete",
+    ) is False
+
+
 def test_router_rejects_result_for_wrong_business():
     def handler(request):
         return make_result(
