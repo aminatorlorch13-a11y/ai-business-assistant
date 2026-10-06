@@ -252,7 +252,7 @@ def test_founder_operations_exposes_commercial_state(
     if status == CommercialStatus.TRIAL:
         add_trial(db, "business-1", NOW)
 
-    view = FounderOperationsService(db).get_business("business-1")
+    view = FounderOperationsService(db, clock=lambda: NOW).get_business("business-1")
 
     assert view is not None
     assert view.commercial["status"] == status.value
@@ -268,7 +268,7 @@ def test_founder_operations_reports_expired_trial_without_mutating_state(
     started_at = NOW - timedelta(days=8)
     add_trial(db, "business-1", started_at)
 
-    service = FounderOperationsService(db)
+    service = FounderOperationsService(db, clock=lambda: NOW)
     view = service.get_business("business-1")
 
     assert view is not None

@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 12
 
 
 class SQLiteDatabase:
@@ -1001,6 +1001,110 @@ def _migrate_v9_to_v10(connection: sqlite3.Connection) -> None:
         """
     )
 
+def _migrate_v10_to_v11(connection: sqlite3.Connection) -> None:
+    """
+    Add durable, single-use capability confirmation records.
+
+    Confirmation records bind one exact prepared capability execution to
+    the authenticated session, user, business, and role that created it.
+    The table deliberately stores the trusted execution payload rather
+    than an AI proposal.
+    """
+    connection.executescript(
+        """
+        CREATE TABLE capability_confirmations (
+            confirmation_id TEXT PRIMARY KEY,
+            session_id_hash TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            business_id TEXT NOT NULL,
+            role TEXT NOT NULL
+                CHECK(role IN ('owner', 'admin', 'member')),
+            capability TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            arguments_json TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            channel TEXT,
+            integration TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            consumed_at TEXT,
+            revoked_at TEXT,
+            FOREIGN KEY(user_id)
+                REFERENCES users(user_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(business_id)
+                REFERENCES businesses(business_id)
+                ON DELETE CASCADE,
+            CHECK(length(confirmation_id) > 0),
+            CHECK(length(session_id_hash) > 0),
+            CHECK(length(user_id) > 0),
+            CHECK(length(business_id) > 0),
+            CHECK(length(capability) > 0),
+            CHECK(length(operation) > 0),
+            CHECK(length(arguments_json) > 0),
+            CHECK(length(reason) > 0),
+            CHECK(expires_at > created_at),
+            CHECK(
+                NOT (
+                    consumed_at IS NOT NULL
+                    AND revoked_at IS NOT NULL
+                )
+            )
+        );
+
+        CREATE INDEX idx_capability_confirmations_session
+            ON capability_confirmations(session_id_hash);
+
+        CREATE INDEX idx_capability_confirmations_user_business
+            ON capability_confirmations(user_id, business_id);
+
+        CREATE INDEX idx_capability_confirmations_expires
+            ON capability_confirmations(expires_at);
+
+        CREATE INDEX idx_capability_confirmations_pending
+            ON capability_confirmations(
+                business_id,
+                session_id_hash,
+                expires_at
+            )
+            WHERE consumed_at IS NULL
+              AND revoked_at IS NULL;
+        """
+    )
+
+
+def _migrate_v11_to_v12(connection: sqlite3.Connection) -> None:
+    """Add explicit durable business capability entitlements."""
+    connection.executescript(
+        '''
+        CREATE TABLE IF NOT EXISTS business_capability_entitlements (
+            business_id TEXT PRIMARY KEY,
+            configured_at TEXT NOT NULL,
+            FOREIGN KEY(business_id)
+                REFERENCES businesses(business_id)
+                ON DELETE CASCADE,
+            CHECK(length(business_id) > 0),
+            CHECK(length(configured_at) > 0)
+        );
+
+        CREATE TABLE IF NOT EXISTS business_capability_grants (
+            business_id TEXT NOT NULL,
+            capability TEXT NOT NULL,
+            PRIMARY KEY(business_id, capability),
+            FOREIGN KEY(business_id)
+                REFERENCES business_capability_entitlements(business_id)
+                ON DELETE CASCADE,
+            CHECK(length(business_id) > 0),
+            CHECK(length(capability) > 0)
+        );
+
+        CREATE INDEX IF NOT EXISTS
+        idx_business_capability_grants_capability
+        ON business_capability_grants(capability);
+        '''
+    )
+
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
@@ -1011,6 +1115,8 @@ MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     7: _migrate_v7_to_v8,
     8: _migrate_v8_to_v9,
     9: _migrate_v9_to_v10,
+    10: _migrate_v10_to_v11,
+    11: _migrate_v11_to_v12,
 }
 
 # Backwards-compatible name for callers that imported SCHEMA.

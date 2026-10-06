@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
+from app.auth.session_security import hash_session_id
 from app.auth.errors import (
     AuthenticationError,
     AuthenticationRateLimited,
@@ -382,9 +382,7 @@ def _normalize_email(email: str) -> str:
 
 
 def _hash_session_id(session_id: str) -> str:
-    return hashlib.sha256(
-        session_id.encode("utf-8")
-    ).hexdigest()
+    return hash_session_id(session_id)
 
 
 def _aware_now(clock) -> datetime:

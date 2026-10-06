@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
 
 from app.persistence.business_repository import SQLiteBusinessRepository
 from app.persistence.commercial_repository import SQLitePurchaseStore
@@ -37,13 +38,20 @@ class FounderOperationsService:
     MAX_EVENTS = 20
     MAX_PURCHASES = 100
 
-    def __init__(self, database: SQLiteDatabase) -> None:
+    def __init__(
+        self,
+        database: SQLiteDatabase,
+        *,
+        clock=datetime.now,
+    ) -> None:
         if not isinstance(database, SQLiteDatabase):
             raise TypeError("database must be a SQLiteDatabase.")
+        if not callable(clock):
+            raise TypeError("clock must be callable.")
 
         from app.web.access import BusinessAccessService
 
-        self._access = BusinessAccessService(database)
+        self._access = BusinessAccessService(database, clock=clock)
         self._businesses = SQLiteBusinessRepository(database)
         self._users = SQLiteUserRepository(database)
         self._memberships = SQLiteMembershipRepository(database)

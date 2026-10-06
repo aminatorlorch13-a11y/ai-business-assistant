@@ -6,6 +6,9 @@ from app.assistant.capability import Capability
 from app.assistant.capability_registry import build_capability_router
 from app.assistant.capability_router import CapabilityRouter
 from app.commercial.entitlement_resolver import ExplicitEntitlementResolver
+from app.persistence.capability_entitlement_repository import (
+    SQLiteCapabilityEntitlementRepository,
+)
 from app.identity.models import UserRole
 from app.memory.scoped_service import ScopedMemoryService
 from app.persistence.memory_repository import SQLiteMemoryRepository
@@ -41,6 +44,7 @@ class ProductionCapabilityComposition:
         operation_policy: CapabilityOperationPolicy,
         router: CapabilityRouter,
         safety_enforcement: SafetyEnforcement,
+        memory_service: ScopedMemoryService,
     ) -> None:
         if not isinstance(
             entitlement_resolver,
@@ -80,11 +84,21 @@ class ProductionCapabilityComposition:
                 "safety_enforcement must be a SafetyEnforcement."
             )
 
+        if not isinstance(memory_service, ScopedMemoryService):
+            raise TypeError(
+                "memory_service must be a ScopedMemoryService."
+            )
+
         self._entitlement_resolver = entitlement_resolver
         self._role_policy = role_policy
         self._operation_policy = operation_policy
         self._router = router
         self._safety_enforcement = safety_enforcement
+        self._memory_service = memory_service
+
+    @property
+    def memory_service(self) -> ScopedMemoryService:
+        return self._memory_service
 
     @property
     def operation_policy(self) -> CapabilityOperationPolicy:
@@ -121,10 +135,6 @@ class ProductionCapabilityComposition:
 def build_production_capability_composition(
     *,
     database,
-    capabilities_by_business: Mapping[
-        str,
-        frozenset[Capability],
-    ],
 ) -> ProductionCapabilityComposition:
     """
     Build the production capability stack.
@@ -136,8 +146,12 @@ def build_production_capability_composition(
     memory_repository = SQLiteMemoryRepository(database)
     memory_service = ScopedMemoryService(memory_repository)
 
+    entitlement_repository = SQLiteCapabilityEntitlementRepository(
+        database
+    )
+
     entitlement_resolver = ExplicitEntitlementResolver(
-        capabilities_by_business
+        entitlement_repository
     )
 
     role_policy = CapabilityRoleOperationPolicy(
@@ -184,4 +198,5 @@ def build_production_capability_composition(
         operation_policy=operation_policy,
         router=router,
         safety_enforcement=safety_enforcement,
+        memory_service=memory_service,
     )

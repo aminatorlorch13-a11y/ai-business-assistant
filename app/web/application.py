@@ -8,6 +8,22 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for, g
 
 from app.assistant.message import AssistantMessage
 from app.assistant.response import AssistantResponse
+from app.assistant.orchestrator import AssistantOrchestrator
+from app.assistant.structured_processor import StructuredAssistantProcessor
+from app.ai.groq_config import GroqConfig
+from app.ai.groq_provider import GroqHTTPProvider
+from app.ai.structured_provider import ParsedRawAIProvider
+from app.identity.tenant import TenantContext
+from app.memory.context import MemoryContextBuilder
+from app.persistence.capability_confirmation import (
+    SQLiteCapabilityConfirmationRepository,
+)
+from app.assistant.capability_confirmation_service import (
+    CapabilityConfirmationService,
+)
+from app.assistant.capability_composition import (
+    build_production_capability_composition,
+)
 from app.auth.errors import AuthenticationError, BusinessSelectionRequired
 from app.auth.service import AuthenticationService
 from app.auth.signup import SQLiteSignupTransaction, SignupConflict
@@ -649,8 +665,18 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
         text = _required(data, "message")
         if len(text) > 8000:
             return jsonify({"error": "Message is too long."}), 400
+        message = AssistantMessage(business.business_id, text)
+
+        # The authenticated principal is the authoritative execution identity.
+        # The AI provider never receives authority to construct this tenant.
+        tenant = TenantContext(
+            business_id=business.business_id,
+            principal=g.principal,
+        )
+
         result = builder(business).handle(
-            AssistantMessage(business.business_id, text),
+            message,
+            tenant=tenant,
             channel="web",
         )
         if not isinstance(result, AssistantResponse):
@@ -661,8 +687,79 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
 
 
 def _production_runtime_builder(business: Business) -> OrchestratorLike:
-    from app.cli.assistant_factory import build_orchestrator_for_business
-    return build_orchestrator_for_business(business)
+    """Build the structured production assistant runtime for one business.
+
+    This is the web composition root for E1.5e-3.
+
+    The AI provider is limited to producing an untrusted AIResult.
+    Capability authorization, confirmation, commercial access, tenant
+    identity, safety enforcement, routing, and execution remain application
+    owned.
+    """
+    if not isinstance(business, Business):
+        raise TypeError("business must be a Business.")
+
+    database = _production_database()
+
+    try:
+        config = GroqConfig.from_environment()
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "Cannot start assistant: Groq is not configured. "
+            f"{exc}"
+        ) from exc
+
+    raw_provider = GroqHTTPProvider(config)
+    structured_provider = ParsedRawAIProvider(raw_provider)
+
+    capability_composition = build_production_capability_composition(
+        database=database,
+    )
+
+    memory_context_builder = MemoryContextBuilder(
+        capability_composition.memory_service,
+    )
+
+    processor = StructuredAssistantProcessor(
+        ai_provider=structured_provider,
+        memory_context_builder=memory_context_builder,
+    )
+
+    confirmation_repository = SQLiteCapabilityConfirmationRepository(
+        database,
+    )
+    confirmation_service = CapabilityConfirmationService(
+        confirmation_repository,
+    )
+
+    commercial_access = BusinessAccessService(database)
+
+    executor = capability_composition.executor_for_business(
+        business.business_id,
+    )
+
+    return AssistantOrchestrator(
+        business=business,
+        processor=processor,
+        executor=executor,
+        capability_operation_policy=(
+            capability_composition.operation_policy
+        ),
+        confirmation_service=confirmation_service,
+        commercial_access=commercial_access,
+    )
+
+
+def _production_database() -> SQLiteDatabase:
+    """Open the authoritative production application database."""
+    database = SQLiteDatabase(
+        os.getenv(
+            "ASSISTANT_DB_PATH",
+            "data/assistant.sqlite3",
+        )
+    )
+    database.initialize()
+    return database
 
 
 def _query_limit(

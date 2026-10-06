@@ -69,7 +69,7 @@ def test_database_schema_matches_current_version(tmp_path):
             """
         ).fetchone()[0]
 
-    assert int(version) == SCHEMA_VERSION == 10
+    assert int(version) == SCHEMA_VERSION
 
 
 def test_platform_events_table_exists(tmp_path):

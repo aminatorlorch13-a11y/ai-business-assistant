@@ -23,6 +23,7 @@ class FakeOrchestrator:
         message: AssistantMessage,
         confirmed: bool = False,
         *,
+        tenant=None,
         channel: str | None = None,
         integration: str | None = None,
     ):
@@ -30,6 +31,7 @@ class FakeOrchestrator:
             {
                 "message": message,
                 "confirmed": confirmed,
+                "tenant": tenant,
                 "channel": channel,
                 "integration": integration,
             }

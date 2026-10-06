@@ -82,6 +82,34 @@ class SQLiteSignupTransaction:
                 (business.business_id, datetime_to_storage(now)),
             )
             connection.execute(
+                '''
+                INSERT INTO business_capability_entitlements(
+                    business_id,
+                    configured_at
+                )
+                VALUES (?, ?)
+                ''',
+                (
+                    business.business_id,
+                    datetime_to_storage(now),
+                ),
+            )
+
+            connection.execute(
+                '''
+                INSERT INTO business_capability_grants(
+                    business_id,
+                    capability
+                )
+                VALUES (?, ?)
+                ''',
+                (
+                    business.business_id,
+                    "memory",
+                ),
+            )
+
+            connection.execute(
                 "INSERT INTO commercial_states(business_id, status) VALUES (?, ?)",
                 (business.business_id, CommercialStatus.TRIAL.value),
             )
