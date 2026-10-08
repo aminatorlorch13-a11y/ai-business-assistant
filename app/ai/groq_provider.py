@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 from app.ai.context import AIContext
 from app.ai.context_renderer import render_ai_context
 from app.ai.privacy_context_builder import PrivacyContextBuilder
+from app.ai.platform_identity import TRUSTED_PLATFORM_IDENTITY
 from app.ai.errors import AIProviderError
 from app.ai.groq_config import GroqConfig
 from app.ai.raw_provider import RawAIProvider
@@ -106,7 +107,7 @@ Rules:
 
 12. Return ONLY the JSON object. Do not include markdown or explanatory
     text outside the object.
-""".strip()
+""".strip() + "\n\n" + TRUSTED_PLATFORM_IDENTITY
 
     def __init__(
         self,
