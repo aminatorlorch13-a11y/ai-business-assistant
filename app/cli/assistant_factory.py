@@ -4,33 +4,43 @@ import os
 
 from app.ai.groq_config import GroqConfig
 from app.ai.groq_provider import GroqHTTPProvider
-from app.ai.interpreting_provider import InterpretingAIProvider
-from app.assistant.action_executor import ActionExecutor
-from app.assistant.interpretation_validator import AIInterpretationValidator
+from app.ai.structured_provider import ParsedRawAIProvider
+from app.assistant.capability_confirmation_service import (
+    CapabilityConfirmationService,
+)
+from app.assistant.capability_composition import (
+    build_production_capability_composition,
+)
 from app.assistant.orchestrator import AssistantOrchestrator
-from app.assistant.processor import AssistantProcessor
+from app.assistant.structured_processor import StructuredAssistantProcessor
 from app.models.business import Business
 from app.models.voice import SUPPORTED_VOICES
-from app.persistence.database import SQLiteDatabase
-from app.persistence.platform_event_repository import SQLitePlatformEventRepository
-from app.persistence.safety_repository import SQLiteSafetyRepository
-from app.safety.enforcement import SafetyEnforcement
-from app.telemetry.platform_events import PlatformEventExecutionTelemetry
-from app.services.appointment_operation import AppointmentOperation
-from app.services.assistant_conversation_operation import (
-    AssistantConversationOperation,
+from app.persistence.capability_confirmation import (
+    SQLiteCapabilityConfirmationRepository,
 )
-from app.services.target_routed_operation import TargetRoutedOperation
-from app.trust.action_policy import ActionPolicy
+from app.persistence.database import SQLiteDatabase
+from app.memory.context import MemoryContextBuilder
+from app.commercial.access import BusinessAccessService
 
 
-BUSINESS_ID = "local-business"
-BUSINESS_NAME = "My Business"
+def _production_database() -> SQLiteDatabase:
+    """Open the authoritative production application database."""
+    database = SQLiteDatabase(
+        os.getenv(
+            "ASSISTANT_DB_PATH",
+            "data/assistant.sqlite3",
+        )
+    )
+    database.initialize()
+    return database
 
 
-def build_ai_provider() -> InterpretingAIProvider:
+def build_ai_provider() -> ParsedRawAIProvider:
     """
-    Construct the production AI provider.
+    Construct the structured production AI provider.
+
+    The provider produces only an untrusted AIResult. It does not receive
+    tenant authority and cannot execute capabilities.
     """
     try:
         config = GroqConfig.from_environment()
@@ -40,88 +50,67 @@ def build_ai_provider() -> InterpretingAIProvider:
             f"{exc}"
         ) from exc
 
-    return InterpretingAIProvider(
-        raw_provider=GroqHTTPProvider(config)
+    return ParsedRawAIProvider(
+        GroqHTTPProvider(config)
     )
 
 
-def build_safety_enforcement() -> SafetyEnforcement:
-    """
-    Build the production emergency safety gate from the authoritative
-    application database.
-    """
-    database = SQLiteDatabase(
-        os.getenv(
-            "ASSISTANT_DB_PATH",
-            "data/assistant.sqlite3",
-        )
-    )
-    database.initialize()
-
-    repository = SQLiteSafetyRepository(database)
-
-    return SafetyEnforcement(repository)
-
-
-def build_business_and_orchestrator(
-    owner_name: str,
-    assistant_name: str,
-    assistant_voice: str,
-) -> tuple[Business, AssistantOrchestrator]:
-    """Build the validated business and its assistant orchestrator."""
-
-    if not owner_name.strip():
-        raise ValueError("owner_name must not be empty.")
-
-    if not assistant_name.strip():
-        raise ValueError("assistant_name must not be empty.")
-
-    if assistant_voice not in SUPPORTED_VOICES:
-        raise ValueError(
-            f"Unsupported assistant voice: {assistant_voice!r}"
-        )
-
-    business = Business(
-        business_id=BUSINESS_ID,
-        name=BUSINESS_NAME,
-        owner_name=owner_name,
-        assistant_name=assistant_name,
-        assistant_voice=assistant_voice,
-    )
-
-    return business, _build_orchestrator(business)
-
-
-def _build_orchestrator(
+def build_orchestrator_for_business(
     business: Business,
-) -> AssistantOrchestrator:
-    ai_provider = build_ai_provider()
+) -> tuple[Business, AssistantOrchestrator]:
+    """
+    Build the canonical structured production assistant runtime.
 
-    processor = AssistantProcessor(
-        ai_provider=ai_provider,
-        validator=AIInterpretationValidator(),
+    The supplied Business must come from the authenticated application's
+    authoritative business repository. This factory does not create or
+    invent tenant identity.
+    """
+    if not isinstance(business, Business):
+        raise TypeError("business must be a Business.")
+
+    database = _production_database()
+
+    structured_provider = build_ai_provider()
+
+    capability_composition = build_production_capability_composition(
+        database=database,
     )
 
-    operation = TargetRoutedOperation(
-        operations_by_target={
-            "assistant": AssistantConversationOperation(),
-            "appointment": AppointmentOperation(),
-        }
+    memory_context_builder = MemoryContextBuilder(
+        capability_composition.memory_service,
     )
 
-    safety_enforcement = build_safety_enforcement()
-
-    executor = ActionExecutor(
-        policy=ActionPolicy(),
-        operation=operation,
-        safety_enforcement=safety_enforcement,
+    processor = StructuredAssistantProcessor(
+        ai_provider=structured_provider,
+        memory_context_builder=memory_context_builder,
     )
 
-    return AssistantOrchestrator(
+    confirmation_repository = SQLiteCapabilityConfirmationRepository(
+        database,
+    )
+
+    confirmation_service = CapabilityConfirmationService(
+        confirmation_repository,
+    )
+
+    commercial_access = BusinessAccessService(database)
+
+    executor = capability_composition.executor_for_business(
+        business.business_id,
+    )
+
+    orchestrator = AssistantOrchestrator(
         business=business,
         processor=processor,
         executor=executor,
+        capability_operation_policy=(
+            capability_composition.operation_policy
+        ),
+        confirmation_service=confirmation_service,
+        commercial_access=commercial_access,
     )
+
+    return business, orchestrator
 
 
 def prompt_for_owner_name() -> str:
@@ -141,7 +130,7 @@ def prompt_for_assistant_identity() -> tuple[str, str]:
     """
     Ask the business owner to name their assistant and choose a voice.
 
-    The assistant has no fixed name or identity of its own.
+    The assistant has no fixed application-owned name or identity.
     """
     while True:
         assistant_name = input(
@@ -167,14 +156,3 @@ def prompt_for_assistant_identity() -> tuple[str, str]:
         )
 
     return assistant_name, assistant_voice
-
-
-def build_orchestrator_for_business(
-    business: Business,
-) -> tuple[Business, AssistantOrchestrator]:
-    """Build an orchestrator from persisted business configuration."""
-
-    if not isinstance(business, Business):
-        raise TypeError("business must be a Business.")
-
-    return business, _build_orchestrator(business)

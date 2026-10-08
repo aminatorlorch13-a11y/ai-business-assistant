@@ -577,6 +577,109 @@ def test_confirmation_survives_new_orchestrator_instance(tmp_path):
     executor.execute.assert_called_once()
 
 
+
+def test_execution_failure_is_returned_as_failure_not_success(tmp_path):
+    processor, executor, policy, confirmation_service, commercial_access, _ = make_structured_stack(tmp_path)
+
+    processor.process.return_value = AIResult(
+        capability_requests=(make_save_request(),)
+    )
+    executor.execute.return_value = CapabilityExecutionResult(
+        success=False,
+        capability=Capability.MEMORY,
+        operation="save",
+        business_id=BUSINESS_ID,
+        error="Memory persistence failed.",
+    )
+
+    orchestrator = make_orchestrator(
+        processor,
+        executor,
+        policy,
+        confirmation_service,
+        commercial_access,
+    )
+
+    result = orchestrator.handle(
+        AssistantMessage(
+            business_id=BUSINESS_ID,
+            content="Remember that the customer prefers email.",
+        ),
+        tenant=make_tenant(),
+    )
+
+    assert result.message == "Memory persistence failed."
+    assert "successfully" not in result.message.lower()
+    executor.execute.assert_called_once()
+
+
+def test_authenticated_tenant_is_forwarded_exactly_to_executor(tmp_path):
+    processor, executor, policy, confirmation_service, commercial_access, _ = make_structured_stack(tmp_path)
+
+    processor.process.return_value = AIResult(
+        capability_requests=(make_save_request(),)
+    )
+    executor.execute.return_value = CapabilityExecutionResult(
+        success=True,
+        capability=Capability.MEMORY,
+        operation="save",
+        business_id=BUSINESS_ID,
+        data="Memory saved.",
+    )
+
+    orchestrator = make_orchestrator(
+        processor,
+        executor,
+        policy,
+        confirmation_service,
+        commercial_access,
+    )
+
+    tenant = make_tenant()
+
+    orchestrator.handle(
+        AssistantMessage(
+            business_id=BUSINESS_ID,
+            content="Remember that the customer prefers email.",
+        ),
+        tenant=tenant,
+    )
+
+    executor.execute.assert_called_once()
+
+    forwarded_request, = executor.execute.call_args.args
+    forwarded_tenant = executor.execute.call_args.kwargs["tenant"]
+
+    assert forwarded_request.business_id == BUSINESS_ID
+    assert forwarded_tenant is tenant
+
+
+def test_invalid_tenant_type_is_rejected_before_processing(tmp_path):
+    processor, executor, policy, confirmation_service, commercial_access, _ = make_structured_stack(tmp_path)
+
+    orchestrator = make_orchestrator(
+        processor,
+        executor,
+        policy,
+        confirmation_service,
+        commercial_access,
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="tenant must be a TenantContext or None",
+    ):
+        orchestrator.handle(
+            AssistantMessage(
+                business_id=BUSINESS_ID,
+                content="Remember this.",
+            ),
+            tenant=object(),
+        )
+
+    processor.process.assert_not_called()
+    executor.execute.assert_not_called()
+
 def test_confirmation_wrong_channel_cannot_execute(tmp_path):
     processor, executor, policy, confirmation_service, commercial_access, _ = make_structured_stack(tmp_path)
 

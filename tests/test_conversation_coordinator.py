@@ -2,27 +2,18 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.ai.contextual_provider import ContextualAIProvider
-from app.ai.provider import AIProvider
-from app.assistant.action import AssistantAction
-from app.assistant.action_executor import ActionExecutor
 from app.assistant.conversation import (
     ConversationHistory,
     ConversationRole,
     ConversationTurn,
 )
 from app.assistant.intent import AssistantIntent
-from app.assistant.interpretation import AIInterpretation
-from app.assistant.interpretation_validator import AIInterpretationValidator
 from app.assistant.orchestrator import AssistantOrchestrator
-from app.assistant.processor import AssistantProcessor
 from app.assistant.response import AssistantResponse
 from app.memory.context import MemoryContext
 from app.memory.context import MemoryContextBuilder
 from app.models.business import Business
 from app.models.voice import VoiceConfiguration
-from app.services.business_operation import BusinessOperation
-from app.trust.action_policy import ActionPolicy
 from app.voice.conversation import ConversationState
 from app.voice.conversation_coordinator import (
     AssistantConversationCoordinator as _ProductionAssistantConversationCoordinator,
@@ -61,70 +52,29 @@ from app.voice.message_adapter import ConversationMessageAdapter
 from app.voice.service import VoiceService
 from app.voice.session import ConversationSession
 from app.voice.speech_input import SpeechInput
-
-
-class RecordingAIProvider(AIProvider):
-    def __init__(self, response_text="AI response"):
-        self.messages = []
-        self.response_text = response_text
-
-    def interpret(self, message, context):
-        self.messages.append(message)
-
-        intent = AssistantIntent(
-            business_id=message.business_id,
-            intent_type="general_question",
-            instruction=message.content,
-        )
-
-        action = AssistantAction(
-            business_id=message.business_id,
-            action_type="none",
-            target="assistant",
-            instruction=self.response_text,
-        )
-
-        return AIInterpretation(
-            intent=intent,
-            action=action,
-        )
+from app.ai.structured_provider import StructuredAIProvider
+from app.assistant.ai_result import AIResult
+from app.assistant.ai_capability_request import AICapabilityRequest
+from app.assistant.capability import Capability
+from app.assistant.capability_confirmation_service import CapabilityConfirmationService
+from app.assistant.capability_preparation import CapabilityExecutionPreparer
+from app.assistant.structured_processor import StructuredAssistantProcessor
+from app.commercial.access import BusinessAccessService
+from app.persistence.capability_confirmation import SQLiteCapabilityConfirmationRepository
+from app.persistence.database import SQLiteDatabase
+from app.trust.capability_executor import CapabilityExecutor
+from app.trust.capability_operation_policy import CapabilityOperationPolicy
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 
-class ContextRecordingAIProvider(AIProvider, ContextualAIProvider):
-    def __init__(self, response_text="AI response"):
-        self.contexts = []
-        self.messages = []
-        self.response_text = response_text
-
-    def interpret(self, message, context):
-        self.messages.append(message)
-        self.contexts.append(context)
-        return make_recording_interpretation(message, self.response_text)
 
 
-def make_recording_interpretation(message, response_text):
-    intent = AssistantIntent(
-        business_id=message.business_id,
-        intent_type="general_question",
-        instruction=message.content,
-    )
-    action = AssistantAction(
-        business_id=message.business_id,
-        action_type="none",
-        target="assistant",
-        instruction=response_text,
-    )
-    return AIInterpretation(intent=intent, action=action)
 
 
-class RecordingBusinessOperation(BusinessOperation):
-    def __init__(self):
-        self.actions = []
 
-    def execute(self, action, tenant=None):
-        self.actions.append(action)
-        return action.instruction
+
 
 
 class RecordingSpeechInputEngine(SpeechInputEngine):
@@ -180,12 +130,6 @@ def make_business(business_id="business-123"):
     )
 
 
-def make_action_executor():
-    return ActionExecutor(
-        policy=ActionPolicy(),
-        operation=RecordingBusinessOperation(),
-        safety_enforcement=AllowAllTestSafetyEnforcement(),
-    )
 
 
 def make_coordinator(
@@ -197,30 +141,25 @@ def make_coordinator(
 ):
     business = make_business()
 
-    provider = RecordingAIProvider(
+    provider = RecordingStructuredAIProvider(
         response_text=response_text,
     )
 
-    memory_context_builder = Mock(spec=MemoryContextBuilder)
-    memory_context_builder.build.return_value = MemoryContext(
-        business_id=business.business_id,
-        memories=(),
+    processor = make_structured_processor(
+        provider,
+        business.business_id,
     )
 
-    processor = AssistantProcessor(
-        ai_provider=provider,
-        validator=AIInterpretationValidator(),
-        memory_context_builder=memory_context_builder,
-    )
+    runtime = make_runtime_dependencies(business.business_id)
 
-    orchestrator = AssistantOrchestrator(
-        business=business,
-        processor=processor,
-        executor=make_action_executor(),
+    orchestrator, confirmation_directory = make_structured_orchestrator(
+        business,
+        processor,
+        commercial_access=runtime.commercial_access,
     )
 
     speech_input_engine = RecordingSpeechInputEngine(
-        speech_inputs or ["Hello assistant."],
+        speech_inputs or ["Hello assistant."]
     )
 
     if speech_engine is None:
@@ -238,7 +177,13 @@ def make_coordinator(
         ),
         message_adapter=ConversationMessageAdapter(),
         session=session,
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
+
+    # Keep the temporary SQLite resources alive for the coordinator lifetime.
+    coordinator._test_runtime_dependencies = runtime
+    coordinator._test_confirmation_directory = confirmation_directory
 
     return (
         coordinator,
@@ -248,6 +193,114 @@ def make_coordinator(
     )
 
 
+class RecordingStructuredAIProvider(StructuredAIProvider):
+    def __init__(self, response_text="AI response", capability_requests=()):
+        self.response_text = response_text
+        self.capability_requests = tuple(capability_requests)
+        self.messages = []
+        self.contexts = []
+
+    def generate(self, message, context):
+        self.messages.append(message)
+        self.contexts.append(context)
+        return AIResult(
+            response=self.response_text,
+            capability_requests=self.capability_requests,
+        )
+
+
+class FailingStructuredAIProvider(StructuredAIProvider):
+    def __init__(self, error="AI processing failed."):
+        self.error = error
+        self.messages = []
+        self.contexts = []
+
+    def generate(self, message, context):
+        self.messages.append(message)
+        self.contexts.append(context)
+        raise RuntimeError(self.error)
+
+
+def make_structured_processor(provider, business_id):
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+    memory_context_builder.build.return_value = MemoryContext(
+        business_id=business_id,
+        memories=(),
+    )
+    return StructuredAssistantProcessor(
+        ai_provider=provider,
+        memory_context_builder=memory_context_builder,
+    )
+
+
+def make_structured_confirmation_service():
+    temporary_directory = TemporaryDirectory(
+        prefix="ai-business-assistant-confirmation-test-"
+    )
+    database = SQLiteDatabase(
+        Path(temporary_directory.name) / "confirmation.sqlite3"
+    )
+    database.initialize()
+    service = CapabilityConfirmationService(
+        SQLiteCapabilityConfirmationRepository(database)
+    )
+    return service, temporary_directory
+
+
+def make_structured_orchestrator(
+    business,
+    processor,
+    executor=None,
+    commercial_access=None,
+):
+    if executor is None:
+        executor = Mock(spec=CapabilityExecutor)
+
+    if commercial_access is None:
+        runtime = make_runtime_dependencies(business.business_id)
+        commercial_access = runtime.commercial_access
+
+    operation_policy = CapabilityOperationPolicy(
+        confirmation_by_operation={
+            Capability.MEMORY: {
+                "save": False,
+                "get": False,
+                "list": False,
+                "delete": True,
+            }
+        }
+    )
+
+    confirmation_service, confirmation_directory = (
+        make_structured_confirmation_service()
+    )
+
+    orchestrator = AssistantOrchestrator(
+        business=business,
+        processor=processor,
+        executor=executor,
+        capability_operation_policy=operation_policy,
+        capability_preparer=CapabilityExecutionPreparer(),
+        confirmation_service=confirmation_service,
+        commercial_access=commercial_access,
+    )
+
+    return orchestrator, confirmation_directory
+
+
+def make_structured_save_request():
+    return AICapabilityRequest(
+        capability=Capability.MEMORY,
+        operation="save",
+        arguments={
+            "memory_id": "memory-001",
+            "content": "Coordinator test memory.",
+            "memory_type": "test",
+            "importance": 5,
+        },
+        reason="Coordinator execution test.",
+        reversible=True,
+    )
 def test_coordinator_rejects_foreign_business_conversation_history():
     session = ConversationSession()
     session.history = ConversationHistory(
@@ -321,40 +374,29 @@ def test_failed_interpretation_does_not_record_conversation_history():
 def test_failed_execution_does_not_record_conversation_history():
     business = make_business()
 
-    provider = RecordingAIProvider(
-        response_text="Execution should not complete."
+    provider = RecordingStructuredAIProvider(
+        response_text=None,
+        capability_requests=(make_structured_save_request(),),
     )
 
-    memory_context_builder = Mock(spec=MemoryContextBuilder)
-    memory_context_builder.build.return_value = MemoryContext(
-        business_id=business.business_id,
-        memories=(),
+    processor = make_structured_processor(
+        provider,
+        business.business_id,
     )
 
-    processor = AssistantProcessor(
-        ai_provider=provider,
-        validator=AIInterpretationValidator(),
-        memory_context_builder=memory_context_builder,
+    runtime = make_runtime_dependencies(business.business_id)
+
+    executor = Mock(spec=CapabilityExecutor)
+    executor.execute.side_effect = RuntimeError(
+        "Business execution failed."
     )
 
-    class FailingActionExecutor(ActionExecutor):
-        def __init__(self):
-            super().__init__(
-                policy=ActionPolicy(),
-                operation=RecordingBusinessOperation(),
-                safety_enforcement=AllowAllTestSafetyEnforcement(),
-            )
-
-        def execute(self, action, confirmed=False, tenant=None):
-            raise RuntimeError("Business execution failed.")
-
-    orchestrator = AssistantOrchestrator(
-        business=business,
-        processor=processor,
-        executor=FailingActionExecutor(),
+    orchestrator, confirmation_directory = make_structured_orchestrator(
+        business,
+        processor,
+        executor=executor,
+        commercial_access=runtime.commercial_access,
     )
-
-    runtime_dependencies = make_runtime_dependencies(business.business_id)
 
     coordinator = AssistantConversationCoordinator(
         business=business,
@@ -369,8 +411,8 @@ def test_failed_execution_does_not_record_conversation_history():
             speed=1.0,
         ),
         message_adapter=ConversationMessageAdapter(),
-        commercial_access=runtime_dependencies.commercial_access,
-        tenant=runtime_dependencies.tenant,
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
 
     with pytest.raises(
@@ -485,27 +527,25 @@ def test_process_text_turn_uses_same_conversation_pipeline():
 
 def test_coordinator_keeps_long_conversation_history_bounded():
     business = make_business()
-    provider = ContextRecordingAIProvider(response_text="Acknowledged.")
 
-    memory_builder = Mock(spec=MemoryContextBuilder)
-    memory_builder.build.return_value = MemoryContext(
-        business_id=business.business_id,
-        memories=(),
+    provider = RecordingStructuredAIProvider(
+        response_text="Acknowledged."
+    )
+
+    processor = make_structured_processor(
+        provider,
+        business.business_id,
+    )
+
+    runtime = make_runtime_dependencies(business.business_id)
+
+    orchestrator, confirmation_directory = make_structured_orchestrator(
+        business,
+        processor,
+        commercial_access=runtime.commercial_access,
     )
 
     session = ConversationSession()
-
-    processor = AssistantProcessor(
-        ai_provider=provider,
-        validator=AIInterpretationValidator(),
-        memory_context_builder=memory_builder,
-    )
-
-    orchestrator = AssistantOrchestrator(
-        business=business,
-        processor=processor,
-        executor=make_action_executor(),
-    )
 
     coordinator = AssistantConversationCoordinator(
         business=business,
@@ -519,6 +559,8 @@ def test_coordinator_keeps_long_conversation_history_bounded():
         ),
         message_adapter=ConversationMessageAdapter(),
         session=session,
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
 
     for number in range(1, 31):
@@ -535,8 +577,6 @@ def test_coordinator_keeps_long_conversation_history_bounded():
     assert final_history.max_turns == 24
     assert len(final_history.turns) == 24
 
-    # The 30th request receives only the 24 most recent
-    # completed turns as prior conversation context.
     expected_contents = []
     for number in range(18, 30):
         expected_contents.append(f"Conversation message {number}.")
@@ -555,24 +595,22 @@ def test_coordinator_keeps_long_conversation_history_bounded():
 
 def test_new_conversation_session_starts_with_empty_history():
     business = make_business()
-    provider = ContextRecordingAIProvider(response_text="Acknowledged.")
 
-    memory_builder = Mock(spec=MemoryContextBuilder)
-    memory_builder.build.return_value = MemoryContext(
-        business_id=business.business_id,
-        memories=(),
+    provider = RecordingStructuredAIProvider(
+        response_text="Acknowledged."
     )
 
-    processor = AssistantProcessor(
-        ai_provider=provider,
-        validator=AIInterpretationValidator(),
-        memory_context_builder=memory_builder,
+    processor = make_structured_processor(
+        provider,
+        business.business_id,
     )
 
-    orchestrator = AssistantOrchestrator(
-        business=business,
-        processor=processor,
-        executor=make_action_executor(),
+    runtime = make_runtime_dependencies(business.business_id)
+
+    orchestrator, confirmation_directory = make_structured_orchestrator(
+        business,
+        processor,
+        commercial_access=runtime.commercial_access,
     )
 
     first_session = ConversationSession()
@@ -589,6 +627,8 @@ def test_new_conversation_session_starts_with_empty_history():
         ),
         message_adapter=ConversationMessageAdapter(),
         session=first_session,
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
 
     first_coordinator.process_text_turn(
@@ -612,6 +652,8 @@ def test_new_conversation_session_starts_with_empty_history():
         ),
         message_adapter=ConversationMessageAdapter(),
         session=second_session,
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
 
     second_coordinator.process_text_turn(
@@ -636,24 +678,22 @@ def test_new_conversation_session_starts_with_empty_history():
 
 def test_ended_conversation_rejects_direct_input_processing():
     business = make_business()
-    provider = ContextRecordingAIProvider(response_text="Acknowledged.")
 
-    memory_builder = Mock(spec=MemoryContextBuilder)
-    memory_builder.build.return_value = MemoryContext(
-        business_id=business.business_id,
-        memories=(),
+    provider = RecordingStructuredAIProvider(
+        response_text="Acknowledged."
     )
 
-    processor = AssistantProcessor(
-        ai_provider=provider,
-        validator=AIInterpretationValidator(),
-        memory_context_builder=memory_builder,
+    processor = make_structured_processor(
+        provider,
+        business.business_id,
     )
 
-    orchestrator = AssistantOrchestrator(
-        business=business,
-        processor=processor,
-        executor=make_action_executor(),
+    runtime = make_runtime_dependencies(business.business_id)
+
+    orchestrator, confirmation_directory = make_structured_orchestrator(
+        business,
+        processor,
+        commercial_access=runtime.commercial_access,
     )
 
     session = ConversationSession()
@@ -670,6 +710,8 @@ def test_ended_conversation_rejects_direct_input_processing():
         ),
         message_adapter=ConversationMessageAdapter(),
         session=session,
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
 
     coordinator.process_text_turn(
@@ -694,24 +736,22 @@ def test_ended_conversation_rejects_direct_input_processing():
 
 def test_ended_conversation_rejects_voice_input_processing():
     business = make_business()
-    provider = ContextRecordingAIProvider(response_text="Acknowledged.")
 
-    memory_builder = Mock(spec=MemoryContextBuilder)
-    memory_builder.build.return_value = MemoryContext(
-        business_id=business.business_id,
-        memories=(),
+    provider = RecordingStructuredAIProvider(
+        response_text="Acknowledged."
     )
 
-    processor = AssistantProcessor(
-        ai_provider=provider,
-        validator=AIInterpretationValidator(),
-        memory_context_builder=memory_builder,
+    processor = make_structured_processor(
+        provider,
+        business.business_id,
     )
 
-    orchestrator = AssistantOrchestrator(
-        business=business,
-        processor=processor,
-        executor=make_action_executor(),
+    runtime = make_runtime_dependencies(business.business_id)
+
+    orchestrator, confirmation_directory = make_structured_orchestrator(
+        business,
+        processor,
+        commercial_access=runtime.commercial_access,
     )
 
     session = ConversationSession()
@@ -728,6 +768,8 @@ def test_ended_conversation_rejects_voice_input_processing():
         ),
         message_adapter=ConversationMessageAdapter(),
         session=session,
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
 
     coordinator.process_text_turn(
@@ -879,18 +921,19 @@ def test_speak_response_rejects_invalid_response():
 
 def test_capture_voice_input_rejects_invalid_speech_result():
     business = make_business()
+    runtime = make_runtime_dependencies(business.business_id)
 
-    provider = RecordingAIProvider()
+    provider = RecordingStructuredAIProvider()
 
-    processor = AssistantProcessor(
-        ai_provider=provider,
-        validator=AIInterpretationValidator(),
+    processor = make_structured_processor(
+        provider,
+        business.business_id,
     )
 
-    orchestrator = AssistantOrchestrator(
-        business=business,
-        processor=processor,
-        executor=make_action_executor(),
+    orchestrator, confirmation_directory = make_structured_orchestrator(
+        business,
+        processor,
+        commercial_access=runtime.commercial_access,
     )
 
     coordinator = AssistantConversationCoordinator(
@@ -904,6 +947,8 @@ def test_capture_voice_input_rejects_invalid_speech_result():
             speed=1.0,
         ),
         message_adapter=ConversationMessageAdapter(),
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
 
     with pytest.raises(TypeError):
@@ -927,38 +972,30 @@ def test_ended_session_cannot_restart():
 
 
 def test_processing_failure_moves_session_to_error():
-    class FailingAIProvider(AIProvider):
-        def interpret(self, message, context):
-            raise RuntimeError("AI processing failed.")
-
     business = make_business()
+    runtime = make_runtime_dependencies(business.business_id)
 
-    memory_context_builder = Mock(spec=MemoryContextBuilder)
-    memory_context_builder.build.return_value = MemoryContext(
-        business_id=business.business_id,
-        memories=(),
+    provider = FailingStructuredAIProvider(
+        error="AI processing failed."
     )
 
-    processor = AssistantProcessor(
-        ai_provider=FailingAIProvider(),
-        validator=AIInterpretationValidator(),
-        memory_context_builder=memory_context_builder,
+    processor = make_structured_processor(
+        provider,
+        business.business_id,
     )
 
-    orchestrator = AssistantOrchestrator(
-        business=business,
-        processor=processor,
-        executor=make_action_executor(),
-    )
-
-    speech_input_engine = RecordingSpeechInputEngine(
-        ["Hello assistant."],
+    orchestrator, confirmation_directory = make_structured_orchestrator(
+        business,
+        processor,
+        commercial_access=runtime.commercial_access,
     )
 
     coordinator = AssistantConversationCoordinator(
         business=business,
         orchestrator=orchestrator,
-        speech_input_engine=speech_input_engine,
+        speech_input_engine=RecordingSpeechInputEngine(
+            ["Hello assistant."]
+        ),
         speech_engine=RecordingSpeechEngine(),
         voice_service=VoiceService(),
         voice_configuration=VoiceConfiguration(
@@ -966,6 +1003,8 @@ def test_processing_failure_moves_session_to_error():
             speed=1.0,
         ),
         message_adapter=ConversationMessageAdapter(),
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
 
     with pytest.raises(
@@ -1014,27 +1053,23 @@ def test_run_preserves_state_after_successful_turn():
 
 def test_same_conversation_exposes_prior_turns_to_assistant_core():
     business = make_business()
-    provider = ContextRecordingAIProvider()
 
-    memory_builder = Mock(spec=MemoryContextBuilder)
-    memory_builder.build.return_value = MemoryContext(
-        business_id=business.business_id,
-        memories=(),
+    provider = RecordingStructuredAIProvider()
+
+    processor = make_structured_processor(
+        provider,
+        business.business_id,
+    )
+
+    runtime = make_runtime_dependencies(business.business_id)
+
+    orchestrator, confirmation_directory = make_structured_orchestrator(
+        business,
+        processor,
+        commercial_access=runtime.commercial_access,
     )
 
     session = ConversationSession()
-
-    processor = AssistantProcessor(
-        ai_provider=provider,
-        validator=AIInterpretationValidator(),
-        memory_context_builder=memory_builder,
-    )
-
-    orchestrator = AssistantOrchestrator(
-        business=business,
-        processor=processor,
-        executor=make_action_executor(),
-    )
 
     coordinator = AssistantConversationCoordinator(
         business=business,
@@ -1048,11 +1083,14 @@ def test_same_conversation_exposes_prior_turns_to_assistant_core():
         ),
         message_adapter=ConversationMessageAdapter(),
         session=session,
+        commercial_access=runtime.commercial_access,
+        tenant=runtime.tenant,
     )
 
     coordinator.process_text_turn(
         "Research the VAT registration requirements."
     )
+
     coordinator.process_text_turn(
         "Now summarize what you found."
     )
@@ -1062,11 +1100,8 @@ def test_same_conversation_exposes_prior_turns_to_assistant_core():
     first_context = provider.contexts[0]
     second_context = provider.contexts[1]
 
-    # The first message has no completed prior conversation.
     assert first_context.conversation_history.is_empty is True
 
-    # The second message receives the completed first turn as prior context.
-    # The current second message remains separate in provider.messages[1].
     history = second_context.conversation_history
 
     assert history.business_id == business.business_id

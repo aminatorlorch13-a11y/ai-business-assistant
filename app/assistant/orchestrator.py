@@ -11,10 +11,8 @@ from app.assistant.execution import (
     CapabilityExecutionResult,
 )
 from app.assistant.message import AssistantMessage
-from app.assistant.processor import AssistantProcessor
 from app.assistant.response import AssistantResponse
 from app.assistant.structured_processor import StructuredAssistantProcessor
-from app.assistant.action_executor import ActionExecutor
 from app.automation.context import AutomationContext
 from app.commercial.access import BusinessAccessService
 from app.identity.tenant import TenantContext
@@ -27,13 +25,8 @@ class AssistantOrchestrator:
     """
     Canonical application orchestration boundary.
 
-    The orchestrator supports two explicitly composed paths during the
-    E1.5e migration:
+    Structured orchestration boundary:
 
-    Legacy:
-        AssistantProcessor -> AssistantAction -> ActionExecutor
-
-    Structured:
         StructuredAssistantProcessor -> AIResult
             -> CapabilityExecutionPreparer
             -> trusted confirmation policy
@@ -45,8 +38,8 @@ class AssistantOrchestrator:
     def __init__(
         self,
         business: Business,
-        processor: AssistantProcessor | StructuredAssistantProcessor,
-        executor: ActionExecutor | CapabilityExecutor,
+        processor: StructuredAssistantProcessor,
+        executor: CapabilityExecutor,
         *,
         capability_operation_policy: CapabilityOperationPolicy | None = None,
         capability_preparer: CapabilityExecutionPreparer | None = None,
@@ -56,91 +49,52 @@ class AssistantOrchestrator:
         if not isinstance(business, Business):
             raise TypeError("business must be a Business.")
 
-        structured_path = (
-            isinstance(processor, StructuredAssistantProcessor)
-            or isinstance(executor, CapabilityExecutor)
-        )
+        if not isinstance(processor, StructuredAssistantProcessor):
+            raise TypeError(
+                "processor must be a StructuredAssistantProcessor."
+            )
 
-        if structured_path:
-            if not isinstance(processor, StructuredAssistantProcessor):
-                raise TypeError(
-                    "Structured orchestration requires a "
-                    "StructuredAssistantProcessor."
-                )
+        if not isinstance(executor, CapabilityExecutor):
+            raise TypeError(
+                "executor must be a CapabilityExecutor."
+            )
 
-            if not isinstance(executor, CapabilityExecutor):
-                raise TypeError(
-                    "Structured orchestration requires a "
-                    "CapabilityExecutor."
-                )
+        if not isinstance(
+            capability_operation_policy,
+            CapabilityOperationPolicy,
+        ):
+            raise TypeError(
+                "capability_operation_policy is required."
+            )
 
-            if not isinstance(
-                capability_operation_policy,
-                CapabilityOperationPolicy,
-            ):
-                raise TypeError(
-                    "capability_operation_policy is required for the "
-                    "structured orchestration path."
-                )
+        if capability_preparer is not None and not isinstance(
+            capability_preparer,
+            CapabilityExecutionPreparer,
+        ):
+            raise TypeError(
+                "capability_preparer must be a "
+                "CapabilityExecutionPreparer or None."
+            )
 
-            if capability_preparer is not None and not isinstance(
-                capability_preparer,
-                CapabilityExecutionPreparer,
-            ):
-                raise TypeError(
-                    "capability_preparer must be a "
-                    "CapabilityExecutionPreparer or None."
-                )
+        if not isinstance(
+            confirmation_service,
+            CapabilityConfirmationService,
+        ):
+            raise TypeError(
+                "confirmation_service is required."
+            )
 
-            if not isinstance(
-                confirmation_service,
-                CapabilityConfirmationService,
-            ):
-                raise TypeError(
-                    "confirmation_service is required for the "
-                    "structured orchestration path."
-                )
-
-            if not isinstance(
-                commercial_access,
-                BusinessAccessService,
-            ):
-                raise TypeError(
-                    "commercial_access is required for the "
-                    "structured orchestration path."
-                )
-        else:
-            # Preserve the existing legacy dependency-injection/test seam.
-            # Concrete legacy dependencies remain the production contract;
-            # tests may provide compatible mocks.
-            if capability_operation_policy is not None:
-                raise TypeError(
-                    "capability_operation_policy is only valid for the "
-                    "structured orchestration path."
-                )
-
-            if capability_preparer is not None:
-                raise TypeError(
-                    "capability_preparer is only valid for the "
-                    "structured orchestration path."
-                )
-
-            if confirmation_service is not None:
-                raise TypeError(
-                    "confirmation_service is only valid for the "
-                    "structured orchestration path."
-                )
-
-            if commercial_access is not None:
-                raise TypeError(
-                    "commercial_access is only valid for the "
-                    "structured orchestration path."
-                )
+        if not isinstance(
+            commercial_access,
+            BusinessAccessService,
+        ):
+            raise TypeError(
+                "commercial_access is required."
+            )
 
         self._business = business
         self._processor = processor
         self._executor = executor
-        self._structured = structured_path
         self._capability_operation_policy = capability_operation_policy
         self._capability_preparer = (
             capability_preparer or CapabilityExecutionPreparer()
@@ -230,19 +184,7 @@ class AssistantOrchestrator:
                 "Execution tenant does not belong to this message business."
             )
 
-        if self._structured:
-            return self._handle_structured(
-                message,
-                confirmed=confirmed,
-                automation_context=automation_context,
-                tenant=tenant,
-                conversation_history=conversation_history,
-                channel=channel,
-                integration=integration,
-                confirmation_id=confirmation_id,
-            )
-
-        return self._handle_legacy(
+        return self._handle_structured(
             message,
             confirmed=confirmed,
             automation_context=automation_context,
@@ -250,61 +192,7 @@ class AssistantOrchestrator:
             conversation_history=conversation_history,
             channel=channel,
             integration=integration,
-        )
-
-    def _handle_legacy(
-        self,
-        message: AssistantMessage,
-        *,
-        confirmed: bool,
-        automation_context: AutomationContext | None,
-        tenant: TenantContext | None,
-        conversation_history: ConversationHistory | None,
-        channel: str | None,
-        integration: str | None,
-    ) -> AssistantResponse:
-        interpretation = self._processor.process(
-            message,
-            automation_context=automation_context,
-            conversation_history=conversation_history,
-        )
-
-        if interpretation.intent.business_id != self._business.business_id:
-            raise ValueError(
-                "AI interpretation intent does not belong to this business."
-            )
-
-        if interpretation.action.business_id != self._business.business_id:
-            raise ValueError(
-                "AI interpretation action does not belong to this business."
-            )
-
-        execution_context = {}
-
-        if channel is not None:
-            execution_context["channel"] = channel
-
-        if integration is not None:
-            execution_context["integration"] = integration
-
-        if confirmed:
-            result = self._executor.execute(
-                interpretation.action,
-                confirmed=True,
-                tenant=tenant,
-                **execution_context,
-            )
-        else:
-            result = self._executor.execute(
-                interpretation.action,
-                tenant=tenant,
-                **execution_context,
-            )
-
-        return AssistantResponse(
-            business_id=self._business.business_id,
-            assistant_name=self._business.assistant_name,
-            message=result,
+            confirmation_id=confirmation_id,
         )
 
     def _handle_structured(

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from app.assistant.conversation import ConversationHistory, ConversationRole
+from app.assistant.message import AssistantMessage
 from app.assistant.orchestrator import AssistantOrchestrator
 from app.assistant.response import AssistantResponse
 from app.identity.tenant import TenantContext
@@ -156,6 +157,7 @@ class AssistantConversationCoordinator(ConversationCoordinator):
             assistant_message,
             tenant=self._tenant,
             conversation_history=prior_history,
+            channel="voice",
         )
 
         # Only record a conversational turn after the Assistant Core has
@@ -165,6 +167,47 @@ class AssistantConversationCoordinator(ConversationCoordinator):
             business_id=self._business.business_id,
             role=ConversationRole.USER,
             content=assistant_message.content,
+        )
+
+        self._session.record_turn(
+            business_id=self._business.business_id,
+            role=ConversationRole.ASSISTANT,
+            content=response.message,
+        )
+
+        return response
+
+    def process_confirmation(
+        self,
+        confirmation_id: str,
+    ) -> AssistantResponse:
+        """Execute an existing durable capability confirmation.
+
+        Confirmation approval is deliberately separate from normal input:
+        the approval must never be interpreted as a new AI request.
+        """
+        if not isinstance(confirmation_id, str) or not confirmation_id.strip():
+            raise ValueError(
+                "confirmation_id must be a non-empty string."
+            )
+
+        if self._session.state == ConversationState.ENDED:
+            raise RuntimeError(
+                "Cannot process confirmation for an ended conversation."
+            )
+
+        self._commercial_access.require_execution(
+            self._business.business_id,
+        )
+
+        response = self._orchestrator.handle(
+            AssistantMessage(
+                business_id=self._business.business_id,
+                content="[voice confirmation]",
+            ),
+            tenant=self._tenant,
+            channel="voice",
+            confirmation_id=confirmation_id,
         )
 
         self._session.record_turn(

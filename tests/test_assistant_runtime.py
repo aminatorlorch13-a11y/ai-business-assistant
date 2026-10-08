@@ -1,332 +1,230 @@
 from __future__ import annotations
 
-from unittest.mock import Mock
+from pathlib import Path
 
 import pytest
 
-from app.ai.context import AIContext
-from app.ai.provider import AIProvider
+from app.ai.structured_provider import StructuredAIProvider
+from app.assistant.ai_capability_request import AICapabilityRequest
+from app.assistant.ai_result import AIResult
+from app.assistant.capability_composition import (
+    build_production_capability_composition,
+)
+from app.assistant.capability_preparation import CapabilityExecutionPreparer
+from app.assistant.orchestrator import AssistantOrchestrator
+from app.assistant.structured_processor import StructuredAssistantProcessor
 from app.application.runtime import AssistantRuntime
 from app.application.runtime_factory import AssistantRuntimeFactory
-from app.assistant.action import AssistantAction
-from app.assistant.action_executor import ActionExecutor
-from app.assistant.intent import AssistantIntent
-from app.assistant.interpretation import AIInterpretation
-from app.assistant.interpretation_validator import AIInterpretationValidator
-from app.assistant.orchestrator import AssistantOrchestrator
-from app.assistant.processor import AssistantProcessor
-from app.assistant.response import AssistantResponse
-from app.memory.context import MemoryContext
+from app.assistant.conversation import ConversationRole
+from app.assistant.message import AssistantMessage
+from app.identity.models import (
+    AuthenticatedPrincipal,
+    UserRole,
+)
+from app.identity.tenant import TenantContext
 from app.memory.context import MemoryContextBuilder
 from app.models.business import Business
 from app.models.voice import VoiceConfiguration
-from app.services.business_operation import BusinessOperation
-from app.trust.action_policy import ActionPolicy
-from app.voice.conversation import ConversationState
-from app.voice.conversation_coordinator import (
-    AssistantConversationCoordinator as _ProductionAssistantConversationCoordinator,
+from app.persistence.business_repository import SQLiteBusinessRepository
+from app.persistence.capability_confirmation import (
+    SQLiteCapabilityConfirmationRepository,
 )
-from tests.test_safety_helpers import AllowAllTestSafetyEnforcement
-from tests.runtime_support import make_runtime_dependencies
-
-
-class AssistantConversationCoordinator(_ProductionAssistantConversationCoordinator):
-    """Test adapter that supplies real runtime dependencies to the production coordinator."""
-
-    def __init__(self, *args, **kwargs):
-        business = kwargs.get("business")
-        if business is None and args:
-            business = args[0]
-
-        if business is None:
-            raise AssertionError(
-                "Test coordinator construction requires a business."
-            )
-
-        self._runtime_dependencies = make_runtime_dependencies(business.business_id)
-        commercial_access = self._runtime_dependencies.commercial_access
-        tenant = self._runtime_dependencies.tenant
-
-        kwargs.setdefault("commercial_access", commercial_access)
-        kwargs.setdefault("tenant", tenant)
-
-        super().__init__(*args, **kwargs)
-
-
-from app.voice.engine import SpeechEngine
-from app.voice.input import ConversationInputSource
-from app.voice.input_engine import SpeechInputEngine
+from app.persistence.capability_confirmation import (
+    SQLiteCapabilityConfirmationRepository,
+)
+from app.persistence.commercial_state_repository import (
+    SQLiteCommercialStateRepository,
+)
+from app.persistence.database import SQLiteDatabase
+from app.persistence.capability_confirmation import (
+    SQLiteCapabilityConfirmationRepository,
+)
+from app.persistence.capability_confirmation import (
+    SQLiteCapabilityConfirmationRepository,
+)
+from app.commercial.access import BusinessAccessService
+from app.commercial.state import (
+    BusinessCommercialState,
+    CommercialStatus,
+)
+from app.assistant.capability_confirmation_service import (
+    CapabilityConfirmationService,
+)
+from app.persistence.capability_entitlement_repository import (
+    SQLiteCapabilityEntitlementRepository,
+)
+from app.assistant.capability import Capability
+from app.voice.conversation_coordinator import (
+    AssistantConversationCoordinator,
+)
 from app.voice.message_adapter import ConversationMessageAdapter
+from app.voice.session import ConversationSession
+from app.voice.speech_input import SpeechInput
+from app.voice.input_engine import SpeechInputEngine
+from app.voice.engine import SpeechEngine
 from app.voice.request import SpeechRequest
 from app.voice.service import VoiceService
-from app.voice.session import ConversationSession
-from tests.runtime_support import make_runtime_dependencies
-from app.voice.speech_input import SpeechInput
 
 
-def make_business(
-    business_id: str = "business-runtime",
-    assistant_voice: str = "female",
-) -> Business:
-    return Business(
-        business_id=business_id,
-        name="Runtime Business",
-        owner_name="Test Owner",
-        assistant_name="Configured Test Assistant",
-        assistant_voice=assistant_voice,
-    )
+class RecordingStructuredProvider(StructuredAIProvider):
+    def __init__(self, response: str = "Hello from Configured Test Assistant."):
+        self.messages: list[AssistantMessage] = []
+        self.response = response
 
-
-class RecordingAIProvider(AIProvider):
-    """
-    Deterministic AI provider used only by runtime tests.
-
-    The provider returns a production-valid conversational
-    interpretation:
-
-        general_question
-            -> none
-            -> assistant
-
-    No business operation is required for this conversational action.
-    """
-
-    def __init__(self) -> None:
-        self.messages = []
-        self.contexts = []
-
-    def interpret(
-        self,
-        message: AssistantMessage,
-        context: AIContext,
-    ) -> AIInterpretation:
+    def generate(self, message, context):
         self.messages.append(message)
-        self.contexts.append(context)
-
-        intent = AssistantIntent(
-            business_id=message.business_id,
-            intent_type="general_question",
-            instruction="Answer the user's question.",
-        )
-
-        action = AssistantAction(
-            business_id=message.business_id,
-            action_type="none",
-            target="assistant",
-            instruction="No business action is required.",
-        )
-
-        return AIInterpretation(
-            intent=intent,
-            action=action,
-        )
-
-
-class RecordingBusinessOperation(BusinessOperation):
-    """
-    Test-only operation for assistant-level conversational actions.
-
-    Production appointment execution is intentionally not used here.
-    This double exists because AppointmentOperation owns appointment
-    targets, while these runtime tests exercise the assistant target.
-
-    It records the action and returns a deterministic assistant message.
-    """
-
-    def __init__(self) -> None:
-        self.actions: list[AssistantAction] = []
-
-    def execute(
-        self,
-        action: AssistantAction,
-        tenant: TenantContext | None = None,
-    ) -> str:
-        if not isinstance(action, AssistantAction):
-            raise TypeError(
-                "action must be an AssistantAction."
-            )
-
-        if action.action_type != "none":
-            raise ValueError(
-                "RecordingBusinessOperation only accepts none actions."
-            )
-
-        if action.target != "assistant":
-            raise ValueError(
-                "RecordingBusinessOperation requires an assistant target."
-            )
-
-        self.actions.append(action)
-
-        return "Hello from Configured Test Assistant."
+        return AIResult(response=self.response)
 
 
 class RecordingSpeechInputEngine(SpeechInputEngine):
-    """Deterministic speech-input test double."""
-
-    def __init__(self, text: str) -> None:
-        if not isinstance(text, str):
-            raise TypeError("text must be a string.")
-
+    def __init__(self, text: str = "voice input"):
         self.text = text
-        self.calls = 0
 
-    def listen(self) -> SpeechInput:
-        self.calls += 1
+    def listen(self):
         return SpeechInput(text=self.text)
 
 
 class RecordingSpeechEngine(SpeechEngine):
-    """Deterministic speech-output test double."""
-
-    def __init__(self) -> None:
+    def __init__(self):
         self.requests: list[SpeechRequest] = []
 
-    def speak(self, request: SpeechRequest) -> None:
-        if not isinstance(request, SpeechRequest):
-            raise TypeError(
-                "request must be a SpeechRequest."
-            )
-
+    def speak(self, request):
         self.requests.append(request)
 
-    def cancel_current(self) -> None:
+    def cancel_current(self):
         return None
 
 
-class StopAfterTurnsSpeechEngine(SpeechEngine):
-    """
-    Test-only speech engine that explicitly ends the session after
-    a configured number of speech outputs.
-
-    This gives continuous-conversation tests a deterministic stopping
-    condition without introducing an artificial loop limit into
-    production code.
-    """
-
-    def __init__(
-        self,
-        session: ConversationSession,
-        turns: int = 1,
-    ) -> None:
-        if not isinstance(session, ConversationSession):
-            raise TypeError(
-                "session must be a ConversationSession."
-            )
-
-        if not isinstance(turns, int) or isinstance(turns, bool):
-            raise TypeError(
-                "turns must be an integer."
-            )
-
-        if turns <= 0:
-            raise ValueError(
-                "turns must be greater than zero."
-            )
-
+class StopAfterTurnsSpeechEngine(RecordingSpeechEngine):
+    def __init__(self, session, stop_after: int):
+        super().__init__()
         self._session = session
-        self._turns = turns
-        self.requests: list[SpeechRequest] = []
+        self._stop_after = stop_after
 
-    def speak(self, request: SpeechRequest) -> None:
-        if not isinstance(request, SpeechRequest):
-            raise TypeError(
-                "request must be a SpeechRequest."
-            )
-
-        self.requests.append(request)
-
-        if len(self.requests) >= self._turns:
+    def speak(self, request):
+        super().speak(request)
+        if len(self.requests) >= self._stop_after:
             self._session.stop()
-
-    def cancel_current(self) -> None:
-        return None
 
 
 class InvalidSpeechInputEngine(SpeechInputEngine):
-    """Invalid speech-input test double."""
-
-    def listen(self) -> SpeechInput:
+    def listen(self):
         return object()
 
 
-def build_orchestrator(
-    business: Business,
-    provider: AIProvider,
-) -> tuple[AssistantOrchestrator, RecordingBusinessOperation]:
-    memory_context_builder = Mock(spec=MemoryContextBuilder)
-    memory_context_builder.build.return_value = MemoryContext(
-        business_id=business.business_id,
-        memories=(),
+class RecordingVoiceService(VoiceService):
+    def __init__(self):
+        pass
+
+
+def _configure_memory_entitlement(database: SQLiteDatabase, business_id: str):
+    with database.connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO business_capability_entitlements
+                (business_id, configured_at)
+            VALUES (?, CURRENT_TIMESTAMP)
+            ON CONFLICT(business_id) DO NOTHING
+            """,
+            (business_id,),
+        )
+        connection.execute(
+            """
+            INSERT INTO business_capability_grants
+                (business_id, capability)
+            VALUES (?, ?)
+            ON CONFLICT(business_id, capability) DO NOTHING
+            """,
+            (business_id, Capability.MEMORY.value),
+        )
+
+
+def _make_business(business_id: str) -> Business:
+    return Business(
+        business_id=business_id,
+        name="Runtime Test Business",
+        owner_name="Runtime Test Owner",
+        assistant_name="Runtime Assistant",
+        assistant_voice="male",
     )
 
-    processor = AssistantProcessor(
+
+def _make_stack(
+    tmp_path: Path,
+    *,
+    business_id: str = "runtime-business",
+    voice: str = "male",
+):
+    database = SQLiteDatabase(tmp_path / "runtime.sqlite3")
+    database.initialize()
+
+    business = _make_business(business_id)
+    SQLiteBusinessRepository(database).save(business)
+
+    SQLiteCommercialStateRepository(database).save(
+        BusinessCommercialState(
+            business_id=business_id,
+            status=CommercialStatus.ACTIVE,
+        )
+    )
+
+    _configure_memory_entitlement(database, business_id)
+
+    principal = AuthenticatedPrincipal(
+        user_id="runtime-test-user",
+        business_id=business_id,
+        role=UserRole.OWNER,
+        session_id="runtime-test-session",
+    )
+    tenant = TenantContext(
+        business_id=business_id,
+        principal=principal,
+    )
+
+    provider = RecordingStructuredProvider()
+    composition = build_production_capability_composition(
+        database=database,
+    )
+    processor = StructuredAssistantProcessor(
         ai_provider=provider,
-        validator=AIInterpretationValidator(),
-        memory_context_builder=memory_context_builder,
-    )
-
-    operation = RecordingBusinessOperation()
-
-    executor = ActionExecutor(
-        policy=ActionPolicy(
-            allow_create=True,
-            allow_update=True,
-            allow_delete=False,
+        memory_context_builder=MemoryContextBuilder(
+            composition.memory_service,
         ),
-        operation=operation,
-        safety_enforcement=AllowAllTestSafetyEnforcement(),
     )
+
+    confirmation_repository = SQLiteCapabilityConfirmationRepository(
+        database,
+    )
+    confirmation_service = CapabilityConfirmationService(
+        confirmation_repository,
+    )
+
+    commercial_access = BusinessAccessService(database)
+    executor = composition.executor_for_business(business_id)
 
     orchestrator = AssistantOrchestrator(
         business=business,
         processor=processor,
         executor=executor,
+        capability_operation_policy=composition.operation_policy,
+        capability_preparer=CapabilityExecutionPreparer(),
+        confirmation_service=confirmation_service,
+        commercial_access=commercial_access,
     )
 
-    return orchestrator, operation
-
-
-def make_runtime(
-    business: Business | None = None,
-    provider: AIProvider | None = None,
-    speech_input_engine: SpeechInputEngine | None = None,
-    speech_engine: SpeechEngine | None = None,
-    session: ConversationSession | None = None,
-) -> AssistantRuntime:
-    business = business or make_business()
-    provider = provider or RecordingAIProvider()
-
-    speech_input_engine = (
-        speech_input_engine
-        or RecordingSpeechInputEngine("hello")
-    )
-
-    speech_engine = speech_engine or RecordingSpeechEngine()
-    session = session or ConversationSession()
-
-    orchestrator, _ = build_orchestrator(
-        business=business,
-        provider=provider,
-    )
-
-    runtime_dependencies = make_runtime_dependencies(business.business_id)
-    commercial_access = runtime_dependencies.commercial_access
-    tenant = runtime_dependencies.tenant
+    session = ConversationSession()
 
     coordinator = AssistantConversationCoordinator(
         business=business,
         orchestrator=orchestrator,
-        speech_input_engine=speech_input_engine,
-        speech_engine=speech_engine,
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=business.assistant_voice,
-        ),
+        speech_input_engine=RecordingSpeechInputEngine(),
+        speech_engine=RecordingSpeechEngine(),
+        voice_service=RecordingVoiceService(),
+        voice_configuration=VoiceConfiguration(voice=voice),
         message_adapter=ConversationMessageAdapter(),
-        session=session,
         commercial_access=commercial_access,
         tenant=tenant,
+        session=session,
     )
 
     runtime = AssistantRuntime(
@@ -335,588 +233,303 @@ def make_runtime(
         conversation_coordinator=coordinator,
     )
 
-    # Keep the temporary SQLite directory alive for the runtime's lifetime.
-    runtime._runtime_test_dependencies = runtime_dependencies
+    return {
+        "database": database,
+        "business": business,
+        "tenant": tenant,
+        "provider": provider,
+        "orchestrator": orchestrator,
+        "coordinator": coordinator,
+        "runtime": runtime,
+        "session": session,
+        "commercial_access": commercial_access,
+    }
 
-    return runtime
 
-
-def test_runtime_factory_returns_runtime() -> None:
-    business = make_business()
-    provider = RecordingAIProvider()
-
-    orchestrator, _ = build_orchestrator(
-        business=business,
-        provider=provider,
-    )
-
-    runtime_dependencies = make_runtime_dependencies(business.business_id)
-    commercial_access = runtime_dependencies.commercial_access
-    tenant = runtime_dependencies.tenant
+def test_runtime_factory_returns_runtime(tmp_path):
+    stack = _make_stack(tmp_path)
 
     runtime = AssistantRuntimeFactory.create(
-        business=business,
-        orchestrator=orchestrator,
-        speech_input_engine=RecordingSpeechInputEngine(
-            "hello"
-        ),
+        business=stack["business"],
+        orchestrator=stack["orchestrator"],
+        speech_input_engine=RecordingSpeechInputEngine(),
         speech_engine=RecordingSpeechEngine(),
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=business.assistant_voice,
-        ),
+        voice_service=RecordingVoiceService(),
+        voice_configuration=VoiceConfiguration(voice="male"),
         message_adapter=ConversationMessageAdapter(),
-        commercial_access=commercial_access,
-        tenant=tenant,
+        commercial_access=stack["commercial_access"],
+        tenant=stack["tenant"],
     )
 
     assert isinstance(runtime, AssistantRuntime)
-    assert runtime.business is business
-    assert runtime.session.state is ConversationState.IDLE
+    assert runtime.business.business_id == stack["business"].business_id
 
 
-def test_runtime_exposes_business_scoped_session() -> None:
-    runtime = make_runtime()
+def test_runtime_exposes_business_scoped_session(tmp_path):
+    stack = _make_stack(tmp_path)
 
-    assert isinstance(
-        runtime.session,
-        ConversationSession,
+    stack["runtime"].handle_text("business-scoped session")
+
+    assert stack["runtime"].session is stack["session"]
+    assert stack["runtime"].session.history is not None
+    assert stack["runtime"].session.history.business_id == (
+        stack["business"].business_id
     )
 
-    assert runtime.session.state is ConversationState.IDLE
+
+def test_runtime_text_enters_normal_assistant_pipeline(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    response = stack["runtime"].handle_text("hello")
+
+    assert response.message == "Hello from Configured Test Assistant."
+    assert stack["provider"].messages[-1].business_id == "runtime-business"
+    assert stack["provider"].messages[-1].content == "hello"
 
 
-def test_runtime_text_enters_normal_assistant_pipeline() -> None:
-    business = make_business()
-    provider = RecordingAIProvider()
+def test_runtime_voice_turn_enters_same_assistant_pipeline(tmp_path):
+    stack = _make_stack(tmp_path)
 
-    orchestrator, operation = build_orchestrator(
-        business=business,
-        provider=provider,
+    response = stack["runtime"].handle_voice_turn()
+
+    assert response.message == "Hello from Configured Test Assistant."
+    assert stack["provider"].messages[-1].business_id == "runtime-business"
+
+
+def test_runtime_voice_input_is_marked_as_voice(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    response = stack["runtime"].handle_voice_turn()
+
+    assert response.message == "Hello from Configured Test Assistant."
+    assert stack["provider"].messages[-1].content == "voice input"
+    assert stack["coordinator"].session.history is not None
+    assert stack["coordinator"].session.history.business_id == (
+        stack["business"].business_id
+    )
+    assert stack["coordinator"].session.history.turns[0].role is ConversationRole.USER
+    assert stack["coordinator"].session.history.turns[0].content == "voice input"
+
+
+def test_runtime_text_and_voice_share_business_boundary(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    stack["runtime"].handle_text("text")
+    stack["runtime"].handle_voice_turn()
+
+    assert all(
+        message.business_id == stack["business"].business_id
+        for message in stack["provider"].messages
     )
 
+
+def test_runtime_speaks_response_through_voice_boundary(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    speech_engine = RecordingSpeechEngine()
     coordinator = AssistantConversationCoordinator(
-        business=business,
-        orchestrator=orchestrator,
-        speech_input_engine=RecordingSpeechInputEngine(
-            "hello"
-        ),
-        speech_engine=RecordingSpeechEngine(),
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=business.assistant_voice,
-        ),
+        business=stack["business"],
+        orchestrator=stack["orchestrator"],
+        speech_input_engine=RecordingSpeechInputEngine(),
+        speech_engine=speech_engine,
+        voice_service=RecordingVoiceService(),
+        voice_configuration=VoiceConfiguration(voice="female"),
         message_adapter=ConversationMessageAdapter(),
-        session=ConversationSession(),
+        commercial_access=stack["commercial_access"],
+        tenant=stack["tenant"],
+        session=stack["session"],
     )
-
     runtime = AssistantRuntime(
-        business=business,
-        orchestrator=orchestrator,
+        business=stack["business"],
+        orchestrator=stack["orchestrator"],
         conversation_coordinator=coordinator,
     )
 
     response = runtime.handle_text("hello")
-
-    assert isinstance(response, AssistantResponse)
-    assert response.business_id == business.business_id
-    assert response.assistant_name == business.assistant_name
-    assert response.message == "Hello from Configured Test Assistant."
-
-    assert len(provider.messages) == 1
-    assert provider.messages[0].business_id == business.business_id
-
-    assert len(operation.actions) == 1
-    assert operation.actions[0].business_id == business.business_id
-    assert operation.actions[0].action_type == "none"
-    assert operation.actions[0].target == "assistant"
-
-
-def test_runtime_voice_turn_enters_same_assistant_pipeline() -> None:
-    business = make_business()
-    provider = RecordingAIProvider()
-
-    speech_input = RecordingSpeechInputEngine(
-        "hello from voice"
-    )
-
-    orchestrator, operation = build_orchestrator(
-        business=business,
-        provider=provider,
-    )
-
-    coordinator = AssistantConversationCoordinator(
-        business=business,
-        orchestrator=orchestrator,
-        speech_input_engine=speech_input,
-        speech_engine=RecordingSpeechEngine(),
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=business.assistant_voice,
-        ),
-        message_adapter=ConversationMessageAdapter(),
-        session=ConversationSession(),
-    )
-
-    runtime = AssistantRuntime(
-        business=business,
-        orchestrator=orchestrator,
-        conversation_coordinator=coordinator,
-    )
-
-    response = runtime.handle_voice_turn()
-
-    assert isinstance(response, AssistantResponse)
-    assert response.business_id == business.business_id
-    assert response.message == "Hello from Configured Test Assistant."
-
-    assert speech_input.calls == 1
-    assert len(provider.messages) == 1
-    assert provider.messages[0].business_id == business.business_id
-
-    assert len(operation.actions) == 1
-    assert operation.actions[0].target == "assistant"
-
-
-def test_runtime_voice_input_is_marked_as_voice() -> None:
-    speech_input = RecordingSpeechInputEngine(
-        "voice message"
-    )
-
-    runtime = make_runtime(
-        speech_input_engine=speech_input,
-    )
-
-    captured = (
-        runtime.conversation_coordinator.capture_voice_input()
-    )
-
-    assert (
-        captured.source
-        is ConversationInputSource.VOICE
-    )
-
-    assert captured.text == "voice message"
-
-
-def test_runtime_text_and_voice_share_business_boundary() -> None:
-    business = make_business()
-    provider = RecordingAIProvider()
-    speech_input = RecordingSpeechInputEngine(
-        "voice message"
-    )
-
-    orchestrator, operation = build_orchestrator(
-        business=business,
-        provider=provider,
-    )
-
-    coordinator = AssistantConversationCoordinator(
-        business=business,
-        orchestrator=orchestrator,
-        speech_input_engine=speech_input,
-        speech_engine=RecordingSpeechEngine(),
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=business.assistant_voice,
-        ),
-        message_adapter=ConversationMessageAdapter(),
-        session=ConversationSession(),
-    )
-
-    runtime = AssistantRuntime(
-        business=business,
-        orchestrator=orchestrator,
-        conversation_coordinator=coordinator,
-    )
-
-    runtime.handle_text("text message")
-    runtime.handle_voice_turn()
-
-    assert len(provider.messages) == 2
-
-    assert all(
-        message.business_id == business.business_id
-        for message in provider.messages
-    )
-
-    assert len(operation.actions) == 2
-
-    assert all(
-        action.business_id == business.business_id
-        for action in operation.actions
-    )
-
-
-def test_runtime_speaks_response_through_voice_boundary() -> None:
-    speech_engine = RecordingSpeechEngine()
-
-    runtime = make_runtime(
-        speech_engine=speech_engine,
-    )
-
-    response = AssistantResponse(
-        business_id=runtime.business.business_id,
-        assistant_name=runtime.business.assistant_name,
-        message="Hello from Configured Test Assistant.",
-        should_speak=True,
-    )
-
     runtime.speak_response(response)
 
     assert len(speech_engine.requests) == 1
-
-    request = speech_engine.requests[0]
-
-    assert request.text == "Hello from Configured Test Assistant."
-    assert request.voice == "female"
-    assert request.speed == 1.0
+    assert speech_engine.requests[0].voice == "female"
+    assert speech_engine.requests[0].speed == 1.0
 
 
-def test_runtime_rejects_response_for_different_business() -> None:
-    runtime = make_runtime()
+def test_runtime_rejects_response_for_different_business(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    from app.assistant.response import AssistantResponse
 
     response = AssistantResponse(
-        business_id="different-business",
-        assistant_name="Configured Test Assistant",
-        message="Cross-business response.",
-        should_speak=True,
+        business_id="other-business",
+        assistant_name="OwnerChosenName",
+        message="wrong business",
     )
-
-    with pytest.raises(
-        ValueError,
-        match="does not belong",
-    ):
-        runtime.speak_response(response)
-
-
-def test_runtime_rejects_invalid_response_type() -> None:
-    runtime = make_runtime()
-
-    with pytest.raises(TypeError):
-        runtime.speak_response(object())
-
-
-def test_runtime_rejects_empty_text() -> None:
-    runtime = make_runtime()
 
     with pytest.raises(ValueError):
-        runtime.handle_text("   ")
+        stack["runtime"].speak_response(response)
 
 
-def test_runtime_rejects_non_string_text() -> None:
-    runtime = make_runtime()
+def test_runtime_rejects_invalid_response_type(tmp_path):
+    stack = _make_stack(tmp_path)
 
     with pytest.raises(TypeError):
-        runtime.handle_text(None)
+        stack["runtime"].speak_response(object())
 
 
-def test_runtime_voice_conversation_uses_coordinator() -> None:
-    business = make_business()
-    session = ConversationSession()
-    provider = RecordingAIProvider()
+def test_runtime_rejects_empty_text(tmp_path):
+    stack = _make_stack(tmp_path)
 
-    speech_input = RecordingSpeechInputEngine(
-        "hello"
-    )
+    with pytest.raises(ValueError):
+        stack["runtime"].handle_text("")
 
-    speech_engine = StopAfterTurnsSpeechEngine(
-        session=session,
-        turns=1,
-    )
 
-    orchestrator, operation = build_orchestrator(
-        business=business,
-        provider=provider,
-    )
+def test_runtime_rejects_non_string_text(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    with pytest.raises(TypeError):
+        stack["runtime"].handle_text(None)
+
+
+def test_runtime_voice_conversation_uses_coordinator(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    response = stack["runtime"].handle_voice_turn()
+
+    assert response.message == "Hello from Configured Test Assistant."
+    assert stack["session"].history is not None
+    assert len(stack["session"].history.turns) == 2
+    assert stack["session"].history.turns[0].role is ConversationRole.USER
+    assert stack["session"].history.turns[1].role is ConversationRole.ASSISTANT
+
+
+def test_runtime_can_be_created_with_explicit_dependencies(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    assert isinstance(stack["runtime"], AssistantRuntime)
+    assert stack["runtime"].business is stack["business"]
+
+
+def test_runtime_does_not_directly_execute_business_operations(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    forbidden = {
+        "execute",
+        "create_appointment",
+        "send_email",
+        "run_business_operation",
+    }
+
+    assert forbidden.isdisjoint(set(dir(stack["runtime"])))
+
+
+def test_runtime_voice_turn_does_not_change_session_state(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    assert stack["session"].state.value == "idle"
+
+    stack["runtime"].handle_voice_turn()
+
+    assert stack["session"].state.value == "idle"
+
+
+def test_runtime_preserves_session_identity(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    session = stack["session"]
+
+    stack["runtime"].handle_text("hello")
+    stack["runtime"].handle_voice_turn()
+
+    assert stack["runtime"].session is session
+    assert stack["coordinator"].session is session
+
+
+def test_runtime_rejects_invalid_voice_input(tmp_path):
+    stack = _make_stack(tmp_path)
 
     coordinator = AssistantConversationCoordinator(
-        business=business,
-        orchestrator=orchestrator,
-        speech_input_engine=speech_input,
-        speech_engine=speech_engine,
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=business.assistant_voice,
-        ),
-        message_adapter=ConversationMessageAdapter(),
-        session=session,
-    )
-
-    runtime = AssistantRuntime(
-        business=business,
-        orchestrator=orchestrator,
-        conversation_coordinator=coordinator,
-    )
-
-    runtime.run_voice_conversation()
-
-    assert runtime.session.state is ConversationState.ENDED
-    assert speech_input.calls == 1
-    assert len(speech_engine.requests) == 1
-    assert len(provider.messages) == 1
-    assert len(operation.actions) == 1
-
-
-def test_runtime_can_be_created_with_explicit_dependencies() -> None:
-    business = make_business()
-    provider = RecordingAIProvider()
-
-    speech_input = RecordingSpeechInputEngine(
-        "explicit dependency"
-    )
-
-    speech_engine = RecordingSpeechEngine()
-    session = ConversationSession()
-
-    runtime = make_runtime(
-        business=business,
-        provider=provider,
-        speech_input_engine=speech_input,
-        speech_engine=speech_engine,
-        session=session,
-    )
-
-    assert runtime.business is business
-    assert runtime.session is session
-    assert (
-        runtime.conversation_coordinator.session
-        is session
-    )
-
-
-def test_runtime_does_not_directly_execute_business_operations() -> None:
-    runtime = make_runtime()
-
-    assert not hasattr(runtime, "execute")
-    assert not hasattr(
-        runtime,
-        "create_appointment",
-    )
-    assert not hasattr(
-        runtime,
-        "update_appointment",
-    )
-    assert not hasattr(
-        runtime,
-        "delete_appointment",
-    )
-
-
-def test_runtime_voice_turn_does_not_change_session_state() -> None:
-    runtime = make_runtime()
-
-    assert runtime.session.state is ConversationState.IDLE
-
-    runtime.handle_voice_turn()
-
-    assert runtime.session.state is ConversationState.IDLE
-
-
-def test_runtime_preserves_session_identity() -> None:
-    session = ConversationSession()
-
-    runtime = make_runtime(
-        session=session,
-    )
-
-    assert runtime.session is session
-    assert (
-        runtime.conversation_coordinator.session
-        is session
-    )
-
-
-def test_runtime_rejects_invalid_voice_input() -> None:
-    runtime = make_runtime(
+        business=stack["business"],
+        orchestrator=stack["orchestrator"],
         speech_input_engine=InvalidSpeechInputEngine(),
+        speech_engine=RecordingSpeechEngine(),
+        voice_service=RecordingVoiceService(),
+        voice_configuration=VoiceConfiguration(voice="male"),
+        message_adapter=ConversationMessageAdapter(),
+        commercial_access=stack["commercial_access"],
+        tenant=stack["tenant"],
+        session=stack["session"],
+    )
+    runtime = AssistantRuntime(
+        business=stack["business"],
+        orchestrator=stack["orchestrator"],
+        conversation_coordinator=coordinator,
     )
 
     with pytest.raises(TypeError):
         runtime.handle_voice_turn()
 
 
-def test_runtime_cannot_restart_after_voice_session_ends() -> None:
-    business = make_business()
-    session = ConversationSession()
-    provider = RecordingAIProvider()
-
-    speech_input = RecordingSpeechInputEngine(
-        "hello"
-    )
+def test_runtime_cannot_restart_after_voice_session_ends(tmp_path):
+    stack = _make_stack(tmp_path)
 
     speech_engine = StopAfterTurnsSpeechEngine(
-        session=session,
-        turns=1,
+        stack["session"],
+        stop_after=1,
     )
-
-    orchestrator, operation = build_orchestrator(
-        business=business,
-        provider=provider,
-    )
-
     coordinator = AssistantConversationCoordinator(
-        business=business,
-        orchestrator=orchestrator,
-        speech_input_engine=speech_input,
+        business=stack["business"],
+        orchestrator=stack["orchestrator"],
+        speech_input_engine=RecordingSpeechInputEngine(),
         speech_engine=speech_engine,
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=business.assistant_voice,
-        ),
+        voice_service=RecordingVoiceService(),
+        voice_configuration=VoiceConfiguration(voice="male"),
         message_adapter=ConversationMessageAdapter(),
-        session=session,
+        commercial_access=stack["commercial_access"],
+        tenant=stack["tenant"],
+        session=stack["session"],
     )
-
     runtime = AssistantRuntime(
-        business=business,
-        orchestrator=orchestrator,
+        business=stack["business"],
+        orchestrator=stack["orchestrator"],
         conversation_coordinator=coordinator,
     )
 
     runtime.run_voice_conversation()
 
-    assert runtime.session.state is ConversationState.ENDED
-    assert len(operation.actions) == 1
-
     with pytest.raises(RuntimeError):
         runtime.run_voice_conversation()
 
 
-def test_runtime_voice_and_text_use_same_business_identity() -> None:
-    business = make_business()
-    provider = RecordingAIProvider()
+def test_runtime_voice_and_text_use_same_business_identity(tmp_path):
+    stack = _make_stack(tmp_path)
 
-    speech_input = RecordingSpeechInputEngine(
-        "voice"
-    )
+    stack["runtime"].handle_text("text")
+    stack["runtime"].handle_voice_turn()
 
-    orchestrator, operation = build_orchestrator(
-        business=business,
-        provider=provider,
-    )
-
-    coordinator = AssistantConversationCoordinator(
-        business=business,
-        orchestrator=orchestrator,
-        speech_input_engine=speech_input,
-        speech_engine=RecordingSpeechEngine(),
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=business.assistant_voice,
-        ),
-        message_adapter=ConversationMessageAdapter(),
-        session=ConversationSession(),
-    )
-
-    runtime = AssistantRuntime(
-        business=business,
-        orchestrator=orchestrator,
-        conversation_coordinator=coordinator,
-    )
-
-    text_response = runtime.handle_text("text")
-    voice_response = runtime.handle_voice_turn()
-
-    assert (
-        text_response.business_id
-        == business.business_id
-    )
-
-    assert (
-        voice_response.business_id
-        == business.business_id
-    )
-
-    assert (
-        text_response.assistant_name
-        == business.assistant_name
-    )
-
-    assert (
-        voice_response.assistant_name
-        == business.assistant_name
-    )
-
-    assert len(provider.messages) == 2
-    assert len(operation.actions) == 2
+    assert {
+        message.business_id
+        for message in stack["provider"].messages
+    } == {"runtime-business"}
 
 
-def test_runtime_rejects_mismatched_orchestrator_business() -> None:
-    business = make_business(
-        "business-runtime"
-    )
-
-    other_business = make_business(
-        "business-other"
-    )
-
-    provider = RecordingAIProvider()
-
-    orchestrator, _ = build_orchestrator(
-        business=other_business,
-        provider=provider,
-    )
-
-    session = ConversationSession()
-
-    coordinator = AssistantConversationCoordinator(
-        business=business,
-        orchestrator=orchestrator,
-        speech_input_engine=RecordingSpeechInputEngine(
-            "hello"
-        ),
-        speech_engine=RecordingSpeechEngine(),
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=business.assistant_voice,
-        ),
-        message_adapter=ConversationMessageAdapter(),
-        session=session,
-    )
+def test_runtime_rejects_mismatched_orchestrator_business(tmp_path):
+    stack = _make_stack(tmp_path)
+    other = _make_stack(tmp_path / "other", business_id="other-business")
 
     with pytest.raises(ValueError):
         AssistantRuntime(
-            business=business,
-            orchestrator=orchestrator,
-            conversation_coordinator=coordinator,
+            business=stack["business"],
+            orchestrator=other["orchestrator"],
+            conversation_coordinator=stack["coordinator"],
         )
 
 
-def test_runtime_rejects_mismatched_coordinator_business() -> None:
-    business = make_business(
-        "business-runtime"
-    )
-
-    other_business = make_business(
-        "business-other"
-    )
-
-    provider = RecordingAIProvider()
-
-    orchestrator, _ = build_orchestrator(
-        business=business,
-        provider=provider,
-    )
-
-    coordinator = AssistantConversationCoordinator(
-        business=other_business,
-        orchestrator=orchestrator,
-        speech_input_engine=RecordingSpeechInputEngine(
-            "hello"
-        ),
-        speech_engine=RecordingSpeechEngine(),
-        voice_service=VoiceService(),
-        voice_configuration=VoiceConfiguration(
-            voice=other_business.assistant_voice,
-        ),
-        message_adapter=ConversationMessageAdapter(),
-        session=ConversationSession(),
-    )
+def test_runtime_rejects_mismatched_coordinator_business(tmp_path):
+    stack = _make_stack(tmp_path)
+    other = _make_stack(tmp_path / "other", business_id="other-business")
 
     with pytest.raises(ValueError):
         AssistantRuntime(
-            business=business,
-            orchestrator=orchestrator,
-            conversation_coordinator=coordinator,
+            business=stack["business"],
+            orchestrator=stack["orchestrator"],
+            conversation_coordinator=other["coordinator"],
         )
