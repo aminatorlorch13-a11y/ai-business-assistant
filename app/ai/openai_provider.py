@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen
 
 from app.ai.context import AIContext
 from app.ai.context_renderer import render_ai_context
+from app.ai.privacy_context_builder import PrivacyContextBuilder
 from app.ai.errors import AIProviderError
 from app.ai.openai_config import OpenAIConfig
 from app.ai.raw_provider import RawAIProvider
@@ -173,7 +174,8 @@ Return only the requested structured object.
                 "AI context does not belong to this business."
             )
 
-        rendered_context = render_ai_context(context)
+        privacy_context = PrivacyContextBuilder().build(context)
+        rendered_context = render_ai_context(privacy_context)
 
         payload = {
             "model": self._config.model,
