@@ -115,7 +115,8 @@ class AssistantProcessor:
             )
 
         memory_context = self._memory_context_builder.build(
-            message.business_id
+            message.business_id,
+            query=message.content,
         )
 
         context = AIContext(

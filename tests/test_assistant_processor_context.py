@@ -96,7 +96,7 @@ def test_processor_supplies_mandatory_ai_context_to_provider():
         "- [customer_preference] Customers prefer email receipts."
     )
 
-    builder.build.assert_called_once_with("business-001")
+    builder.build.assert_called_once_with("business-001", query="Please create an appointment.")
 
 
 def test_processor_requires_memory_context_builder():

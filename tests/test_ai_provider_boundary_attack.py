@@ -9,6 +9,7 @@ from app.ai.groq_config import GroqConfig
 from app.ai.groq_provider import GroqHTTPProvider
 from app.ai.openai_config import OpenAIConfig
 from app.ai.openai_provider import OpenAIHTTPProvider
+from app.ai.provider_request_budget import MAX_PROVIDER_TEXT_CHARS
 from app.assistant.conversation import (
     ConversationHistory,
     ConversationRole,
@@ -592,3 +593,34 @@ def test_untrusted_context_cannot_redefine_creator_identity(untrusted_content):
     assert "Amin Shabangu" in TRUSTED_PLATFORM_IDENTITY
     assert "Aminator Lorch" in TRUSTED_PLATFORM_IDENTITY
     assert untrusted_content not in TRUSTED_PLATFORM_IDENTITY
+
+
+@pytest.mark.parametrize(
+    ("provider_type", "config", "module"),
+    [
+        (
+            GroqHTTPProvider,
+            GroqConfig(api_key="gsk_test", timeout_seconds=1),
+            "app.ai.groq_provider",
+        ),
+        (
+            OpenAIHTTPProvider,
+            OpenAIConfig(api_key="sk_test", timeout_seconds=1),
+            "app.ai.openai_provider",
+        ),
+    ],
+)
+def test_provider_rejects_oversized_owner_message_before_network(
+    monkeypatch, provider_type, config, module
+):
+    def unexpected_network_call(*args, **kwargs):
+        pytest.fail("Oversized request must be rejected before network access")
+
+    monkeypatch.setattr(f"{module}.urlopen", unexpected_network_call)
+    oversized_message = AssistantMessage(
+        business_id="business-1",
+        content="x" * (MAX_PROVIDER_TEXT_CHARS + 1),
+    )
+
+    with pytest.raises(ValueError, match="text-size budget"):
+        provider_type(config).generate(oversized_message, context())

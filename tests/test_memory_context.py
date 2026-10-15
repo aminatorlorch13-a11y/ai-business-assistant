@@ -165,3 +165,95 @@ def test_builder_rejects_invalid_memory_limit_type():
 
     with pytest.raises(TypeError, match="integer"):
         MemoryContextBuilder(service, max_memories="10")
+
+
+def test_builder_prioritizes_memories_relevant_to_the_request():
+    repository = InMemoryMemoryRepository()
+    service = ScopedMemoryService(repository)
+    builder = MemoryContextBuilder(service, max_memories=3)
+
+    unrelated_high = make_memory(
+        "memory-001", "business-001", 5,
+        "Office chairs are replaced every two years.",
+    )
+    relevant_lower = make_memory(
+        "memory-002", "business-001", 2,
+        "Customers prefer email receipts for online orders.",
+    )
+    relevant_higher = make_memory(
+        "memory-003", "business-001", 4,
+        "Email receipts are required for every sale.",
+    )
+    for memory in (unrelated_high, relevant_lower, relevant_higher):
+        repository.save(memory)
+
+    context = builder.build("business-001", query="How should we send email receipts?")
+
+    assert context.memories == (
+        relevant_higher,
+        relevant_lower,
+        unrelated_high,
+    )
+
+
+def test_builder_uses_importance_and_id_to_break_relevance_ties():
+    repository = InMemoryMemoryRepository()
+    builder = MemoryContextBuilder(ScopedMemoryService(repository))
+
+    lower = make_memory(
+        "memory-002", "business-001", 2,
+        "Email receipts are available.",
+    )
+    higher = make_memory(
+        "memory-001", "business-001", 5,
+        "Email receipts are mandatory.",
+    )
+    repository.save(lower)
+    repository.save(higher)
+
+    context = builder.build("business-001", query="email receipts")
+
+    assert context.memories == (higher, lower)
+
+
+def test_builder_falls_back_to_importance_when_nothing_matches():
+    repository = InMemoryMemoryRepository()
+    builder = MemoryContextBuilder(ScopedMemoryService(repository))
+
+    lower = make_memory(
+        "memory-001", "business-001", 2, "Office chair policy.",
+    )
+    higher = make_memory(
+        "memory-002", "business-001", 5, "Delivery policy.",
+    )
+    repository.save(lower)
+    repository.save(higher)
+
+    context = builder.build("business-001", query="unrelated astronomy")
+
+    assert context.memories == (higher, lower)
+
+
+def test_request_aware_builder_stays_within_business_scope():
+    repository = InMemoryMemoryRepository()
+    builder = MemoryContextBuilder(ScopedMemoryService(repository))
+
+    own = make_memory(
+        "memory-001", "business-001", 1, "Private email receipt policy.",
+    )
+    other = make_memory(
+        "memory-002", "business-002", 5, "Private email receipt policy.",
+    )
+    repository.save(own)
+    repository.save(other)
+
+    context = builder.build("business-001", query="email receipt policy")
+
+    assert context.memories == (own,)
+
+
+def test_builder_rejects_non_string_query():
+    builder = make_builder()
+
+    with pytest.raises(TypeError, match="query"):
+        builder.build("business-001", query=123)

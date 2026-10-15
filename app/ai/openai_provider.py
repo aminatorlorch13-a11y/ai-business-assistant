@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 from app.ai.context import AIContext
 from app.ai.context_renderer import render_ai_context
 from app.ai.privacy_context_builder import PrivacyContextBuilder
+from app.ai.provider_request_budget import validate_provider_request_size
 from app.ai.platform_identity import TRUSTED_PLATFORM_IDENTITY
 from app.ai.errors import AIProviderError
 from app.ai.openai_config import OpenAIConfig
@@ -178,6 +179,23 @@ Return only the requested structured object.
         privacy_context = PrivacyContextBuilder().build(context)
         rendered_context = render_ai_context(privacy_context)
 
+        user_content = (
+            "APPLICATION CONTROLLED CONTEXT\n"
+            "==============================\n"
+            f"Application business_id: "
+            f"{context.memory_context.business_id}\n\n"
+            f"{rendered_context}\n\n"
+            "END APPLICATION CONTROLLED CONTEXT\n\n"
+            "OWNER MESSAGE\n"
+            "=============\n"
+            f"{message.content}"
+        )
+        validate_provider_request_size(
+            instructions=self.SYSTEM_INSTRUCTIONS,
+            user_content=user_content,
+            structured_output=json.dumps(self.RESPONSE_SCHEMA, separators=(",", ":")),
+        )
+
         payload = {
             "model": self._config.model,
             "instructions": self.SYSTEM_INSTRUCTIONS,
@@ -187,17 +205,7 @@ Return only the requested structured object.
                     "content": [
                         {
                             "type": "input_text",
-                            "text": (
-                                "APPLICATION CONTROLLED CONTEXT\n"
-                                "==============================\n"
-                                f"Application business_id: "
-                                f"{context.memory_context.business_id}\n\n"
-                                f"{rendered_context}\n\n"
-                                "END APPLICATION CONTROLLED CONTEXT\n\n"
-                                "OWNER MESSAGE\n"
-                                "=============\n"
-                                f"{message.content}"
-                            ),
+                            "text": user_content,
                         }
                     ],
                 }
