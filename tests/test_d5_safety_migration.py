@@ -57,7 +57,7 @@ def test_fresh_database_initializes_at_current_schema(tmp_path):
     db = SQLiteDatabase(tmp_path / "fresh.db")
     db.initialize()
 
-    assert SCHEMA_VERSION == 12
+    assert SCHEMA_VERSION == 14
     assert _schema_version(db) == SCHEMA_VERSION
 
     assert _table_names(db) == {
@@ -478,3 +478,147 @@ def test_current_safety_tables_are_reused_on_restart(tmp_path):
         "safety_incidents",
         "safety_controls",
     }
+
+
+def test_v13_to_v14_creates_voice_history(tmp_path):
+    db = SQLiteDatabase(tmp_path / "v13-to-v14.db")
+    db.initialize()
+
+    # Create a genuine v13-shaped state while preserving existing owner data.
+    with db.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO businesses(
+                business_id, name, owner_name, assistant_name, assistant_voice
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            ("voice-business", "Voice Business", "Owner", "Assistant", "calm"),
+        )
+        connection.execute(
+            """
+            INSERT INTO users(user_id, display_name, email)
+            VALUES (?, ?, ?)
+            """,
+            ("voice-user", "Voice User", "voice-user@example.test"),
+        )
+        connection.execute(
+            """
+            INSERT INTO business_memberships(user_id, business_id, role)
+            VALUES (?, ?, ?)
+            """,
+            ("voice-user", "voice-business", "owner"),
+        )
+        connection.execute("DROP TABLE IF EXISTS voice_conversation_turns")
+        connection.execute("DROP TABLE IF EXISTS voice_conversations")
+        connection.execute(
+            """
+            UPDATE persistence_metadata
+            SET value = '13'
+            WHERE key = 'schema_version'
+            """
+        )
+
+    assert _schema_version(db) == 13
+    db.initialize()
+    assert _schema_version(db) == 14
+
+    with db.connection() as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table'
+                  AND name IN (
+                      'voice_conversations',
+                      'voice_conversation_turns'
+                  )
+                """
+            ).fetchall()
+        }
+        membership = connection.execute(
+            """
+            SELECT role FROM business_memberships
+            WHERE user_id = ? AND business_id = ?
+            """,
+            ("voice-user", "voice-business"),
+        ).fetchone()
+
+    assert tables == {
+        "voice_conversations",
+        "voice_conversation_turns",
+    }
+    assert membership is not None
+    assert membership["role"] == "owner"
+
+    with db.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO voice_conversations(
+                conversation_id, user_id, business_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "voice-conversation-1",
+                "voice-user",
+                "voice-business",
+                "2026-10-14T10:00:00+00:00",
+                "2026-10-14T10:00:00+00:00",
+            ),
+        )
+
+    with db.connection() as connection:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO voice_conversation_turns(
+                    conversation_id, sequence, role, content, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    "voice-conversation-1", 1, "system", "invalid role",
+                    "2026-10-14T10:00:00+00:00",
+                ),
+            )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO voice_conversation_turns(
+                    conversation_id, sequence, role, content, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    "voice-conversation-1", 1, "user", "   ",
+                    "2026-10-14T10:00:00+00:00",
+                ),
+            )
+
+    with db.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO voice_conversation_turns(
+                conversation_id, sequence, role, content, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "voice-conversation-1", 1, "user", "Keep this history",
+                "2026-10-14T10:00:00+00:00",
+            ),
+        )
+        # Removing membership cascades through conversations to their turns.
+        connection.execute(
+            """
+            DELETE FROM business_memberships
+            WHERE user_id = ? AND business_id = ?
+            """,
+            ("voice-user", "voice-business"),
+        )
+
+    with db.connection() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM voice_conversations"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM voice_conversation_turns"
+        ).fetchone()[0] == 0

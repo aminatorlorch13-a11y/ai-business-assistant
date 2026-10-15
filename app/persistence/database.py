@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 14
 
 
 class SQLiteDatabase:
@@ -1105,6 +1105,79 @@ def _migrate_v11_to_v12(connection: sqlite3.Connection) -> None:
     )
 
 
+
+
+def _migrate_v12_to_v13(connection: sqlite3.Connection) -> None:
+    """Add durable, user-scoped web conversation history."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS web_conversation_turns (
+            user_id TEXT NOT NULL,
+            business_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK(sequence > 0),
+            role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+            content TEXT NOT NULL CHECK(length(trim(content)) > 0),
+            created_at TEXT NOT NULL CHECK(length(created_at) > 0),
+            PRIMARY KEY(user_id, business_id, sequence),
+            FOREIGN KEY(user_id)
+                REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY(business_id)
+                REFERENCES businesses(business_id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_web_conversation_business_user
+        ON web_conversation_turns(business_id, user_id, sequence)
+        """
+    )
+
+
+def _migrate_v13_to_v14(connection: sqlite3.Connection) -> None:
+    """Add durable, membership-scoped voice conversation history."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS voice_conversations (
+            conversation_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            business_id TEXT NOT NULL,
+            created_at TEXT NOT NULL CHECK(length(trim(created_at)) > 0),
+            updated_at TEXT NOT NULL CHECK(length(trim(updated_at)) > 0),
+            FOREIGN KEY(user_id, business_id)
+                REFERENCES business_memberships(user_id, business_id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_voice_conversations_owner_updated
+        ON voice_conversations(user_id, business_id, updated_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS voice_conversation_turns (
+            conversation_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK(sequence > 0),
+            role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+            content TEXT NOT NULL CHECK(length(trim(content)) > 0),
+            created_at TEXT NOT NULL CHECK(length(trim(created_at)) > 0),
+            PRIMARY KEY(conversation_id, sequence),
+            FOREIGN KEY(conversation_id)
+                REFERENCES voice_conversations(conversation_id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_voice_turns_conversation_sequence
+        ON voice_conversation_turns(conversation_id, sequence)
+        """
+    )
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
@@ -1117,6 +1190,8 @@ MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     9: _migrate_v9_to_v10,
     10: _migrate_v10_to_v11,
     11: _migrate_v11_to_v12,
+    12: _migrate_v12_to_v13,
+    13: _migrate_v13_to_v14,
 }
 
 # Backwards-compatible name for callers that imported SCHEMA.

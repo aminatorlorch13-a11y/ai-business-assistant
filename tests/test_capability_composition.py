@@ -139,7 +139,7 @@ def test_memory_confirmation_policy_is_application_owned(tmp_path):
 
     assert composition.operation_policy.requires_confirmation(
         Capability.MEMORY, "save"
-    ) is False
+    ) is True
 
     assert composition.operation_policy.requires_confirmation(
         Capability.MEMORY, "get"

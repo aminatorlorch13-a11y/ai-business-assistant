@@ -258,15 +258,49 @@ class AssistantOrchestrator:
                 integration=integration,
             )
 
-            if self._capability_operation_policy.requires_confirmation(
-                execution_request.capability,
-                execution_request.operation,
-            ):
+            is_memory_save = (
+                execution_request.capability.value == "memory"
+                and execution_request.operation == "save"
+            )
+
+            if is_memory_save:
+                proposed_content = execution_request.arguments.get("content")
+                if not isinstance(proposed_content, str) or not proposed_content.strip():
+                    responses.append(
+                        "I couldn't prepare a memory because its content is missing or invalid."
+                    )
+                    continue
+
+                if not self._user_explicitly_requested_memory_save(message.content):
+                    responses.append(
+                        "I won't save a memory based only on an AI suggestion. "
+                        "If you want this saved, explicitly ask me to remember it. Proposed memory: "
+                        f"{proposed_content!r}"
+                    )
+                    continue
+
+            requires_confirmation = (
+                self._capability_operation_policy.requires_confirmation(
+                    execution_request.capability,
+                    execution_request.operation,
+                )
+                or is_memory_save
+            )
+            if requires_confirmation:
+                if tenant is None:
+                    raise PermissionError('Authenticated tenant context is required for capability confirmation.')
                 assert self._commercial_access is not None
                 assert self._confirmation_service is not None
 
                 self._commercial_access.require_execution(
                     self._business.business_id
+                )
+
+                # Fail closed before issuing a confirmation.
+                # Execution repeats these checks when approval is used.
+                self._executor.authorize(
+                    execution_request,
+                    tenant=tenant,
                 )
 
                 confirmation = self._confirmation_service.create(
@@ -314,9 +348,7 @@ class AssistantOrchestrator:
             )
 
         if not isinstance(confirmation_id, str) or not confirmation_id.strip():
-            raise ValueError(
-                "confirmation_id must be a non-empty string."
-            )
+            raise ValueError("confirmation_id must be a non-empty string.")
 
         assert self._confirmation_service is not None
         assert self._commercial_access is not None
@@ -327,27 +359,76 @@ class AssistantOrchestrator:
             channel=channel,
             integration=integration,
         )
-
         if confirmation is None:
-            raise PermissionError(
-                "Capability confirmation is invalid, expired, revoked, "
-                "already consumed, or bound to a different security context."
-            )
-
-        self._commercial_access.require_execution(
-            self._business.business_id
-        )
-
-        result = self._execute_capability(
-            confirmation.request,
-            tenant,
-        )
+            raise PermissionError('Capability confirmation is invalid, expired, or does not match this session, channel, or integration.')
+        self._commercial_access.require_execution(self._business.business_id)
+        result = self._execute_capability(confirmation.request, tenant)
 
         return AssistantResponse(
             business_id=self._business.business_id,
             assistant_name=self._business.assistant_name,
             message=self._result_message(result),
         )
+
+    @staticmethod
+    def _user_explicitly_requested_memory_save(content: str) -> bool:
+        if not isinstance(content, str):
+            return False
+
+        text = " ".join(
+            content.casefold().replace("’", "'").split()
+        )
+
+        # Questions are not consent to persist information.
+        if text.endswith("?"):
+            return False
+
+        negative_phrases = (
+            "don't want you to remember",
+            "do not want you to remember",
+            "don't want this stored",
+            "do not want this stored",
+            "don't consent to saving",
+            "do not consent to saving",
+            "don't consent to save",
+            "do not consent to save",
+            "don't want you to save",
+            "do not want you to save",
+            "don't want you to store",
+            "do not want you to store",
+            "don't remember",
+            "do not remember",
+            "never remember",
+            "don't save",
+            "do not save",
+            "never save",
+            "don't store",
+            "do not store",
+            "never store",
+            "not asking you to remember",
+            "not asking you to save",
+            "not asking you to store",
+            "didn't ask you to remember",
+            "did not ask you to remember",
+        )
+        if any(phrase in text for phrase in negative_phrases):
+            return False
+
+        # Accept clear instructions only at the beginning of the message.
+        explicit_prefixes = (
+            "remember that ",
+            "remember this",
+            "please remember ",
+            "save this to memory",
+            "save this in memory",
+            "store this in memory",
+            "please save this",
+            "please store this",
+            "keep a note that ",
+            "don't forget that ",
+            "do not forget that ",
+        )
+        return text.startswith(explicit_prefixes)
 
     def _execute_capability(
         self,
@@ -369,11 +450,18 @@ class AssistantOrchestrator:
         request: CapabilityExecutionRequest,
         confirmation_id: str,
     ) -> str:
-        return (
+        message = (
             "Confirmation required before executing "
             f"{request.capability.value}.{request.operation}. "
-            f"Confirmation ID: {confirmation_id}"
         )
+        if (
+            request.capability.value == "memory"
+            and request.operation == "save"
+        ):
+            content = request.arguments.get("content")
+            if isinstance(content, str):
+                message += f"Proposed memory: {content!r}. "
+        return message + f"Confirmation ID: {confirmation_id}"
 
     @staticmethod
     def _result_message(

@@ -115,7 +115,7 @@ def seed_business_and_user(db: SQLiteDatabase) -> None:
 def test_fresh_database_is_current_schema(tmp_path):
     db = make_db(tmp_path)
 
-    assert SCHEMA_VERSION == 12
+    assert SCHEMA_VERSION == 14
 
     with db.connection() as connection:
         version = connection.execute(

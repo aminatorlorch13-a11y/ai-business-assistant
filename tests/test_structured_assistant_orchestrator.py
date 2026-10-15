@@ -490,12 +490,23 @@ def test_successful_non_confirmed_capability_executes_through_executor(tmp_path)
         commercial_access,
     )
 
+    tenant = make_tenant()
+    first = orchestrator.handle(
+        AssistantMessage(
+                business_id=BUSINESS_ID,
+                content="Remember that the customer prefers email.",
+            ),
+        tenant=tenant,
+    )
+    assert "Confirmation ID: " in first.message
+    confirmation_id = first.message.split("Confirmation ID: ", 1)[1]
     result = orchestrator.handle(
         AssistantMessage(
-            business_id=BUSINESS_ID,
-            content="Remember that the customer prefers email.",
-        ),
-        tenant=make_tenant(),
+                business_id=BUSINESS_ID,
+                content="Remember that the customer prefers email.",
+            ),
+        tenant=tenant,
+        confirmation_id=confirmation_id,
     )
 
     assert result.message == "Memory saved."
@@ -600,12 +611,23 @@ def test_execution_failure_is_returned_as_failure_not_success(tmp_path):
         commercial_access,
     )
 
+    tenant = make_tenant()
+    first = orchestrator.handle(
+        AssistantMessage(
+                business_id=BUSINESS_ID,
+                content="Remember that the customer prefers email.",
+            ),
+        tenant=tenant,
+    )
+    assert "Confirmation ID: " in first.message
+    confirmation_id = first.message.split("Confirmation ID: ", 1)[1]
     result = orchestrator.handle(
         AssistantMessage(
-            business_id=BUSINESS_ID,
-            content="Remember that the customer prefers email.",
-        ),
-        tenant=make_tenant(),
+                business_id=BUSINESS_ID,
+                content="Remember that the customer prefers email.",
+            ),
+        tenant=tenant,
+        confirmation_id=confirmation_id,
     )
 
     assert result.message == "Memory persistence failed."
@@ -637,12 +659,22 @@ def test_authenticated_tenant_is_forwarded_exactly_to_executor(tmp_path):
 
     tenant = make_tenant()
 
+    first = orchestrator.handle(
+        AssistantMessage(
+                business_id=BUSINESS_ID,
+                content="Remember that the customer prefers email.",
+            ),
+        tenant=tenant,
+    )
+    assert "Confirmation ID: " in first.message
+    confirmation_id = first.message.split("Confirmation ID: ", 1)[1]
     orchestrator.handle(
         AssistantMessage(
-            business_id=BUSINESS_ID,
-            content="Remember that the customer prefers email.",
-        ),
+                business_id=BUSINESS_ID,
+                content="Remember that the customer prefers email.",
+            ),
         tenant=tenant,
+        confirmation_id=confirmation_id,
     )
 
     executor.execute.assert_called_once()

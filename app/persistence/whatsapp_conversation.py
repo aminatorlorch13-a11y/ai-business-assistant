@@ -6,7 +6,6 @@ from app.assistant.conversation import (
     ConversationHistory,
     ConversationRole,
     ConversationTurn,
-    DEFAULT_MAX_CONVERSATION_TURNS,
 )
 from app.persistence.database import SQLiteDatabase
 from app.persistence.serialization import datetime_to_storage
@@ -34,7 +33,7 @@ class SQLiteWhatsAppConversationRepository:
         *,
         binding_id: str,
         business_id: str,
-        max_turns: int = DEFAULT_MAX_CONVERSATION_TURNS,
+        max_turns: int | None = None,
     ) -> ConversationHistory:
         _validate_identifier(binding_id, "binding_id")
         _validate_identifier(business_id, "business_id")
@@ -47,22 +46,30 @@ class SQLiteWhatsAppConversationRepository:
                 business_id=business_id,
             )
 
-            rows = connection.execute(
-                """
-                SELECT
-                    business_id,
-                    role,
-                    content
-                FROM whatsapp_conversation_turns
-                WHERE binding_id = ?
-                  AND business_id = ?
-                ORDER BY sequence DESC
-                LIMIT ?
-                """,
-                (binding_id, business_id, max_turns),
-            ).fetchall()
-
-        rows = list(reversed(rows))
+            if max_turns is None:
+                rows = connection.execute(
+                    """
+                    SELECT business_id, role, content
+                    FROM whatsapp_conversation_turns
+                    WHERE binding_id = ?
+                      AND business_id = ?
+                    ORDER BY sequence ASC
+                    """,
+                    (binding_id, business_id),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT business_id, role, content
+                    FROM whatsapp_conversation_turns
+                    WHERE binding_id = ?
+                      AND business_id = ?
+                    ORDER BY sequence DESC
+                    LIMIT ?
+                    """,
+                    (binding_id, business_id, max_turns),
+                ).fetchall()
+                rows = list(reversed(rows))
 
         turns = tuple(
             ConversationTurn(
@@ -87,7 +94,7 @@ class SQLiteWhatsAppConversationRepository:
         user_content: str,
         assistant_content: str,
         created_at: datetime,
-        max_turns: int = DEFAULT_MAX_CONVERSATION_TURNS,
+        max_turns: int | None = None,
         exchange_id: str | None = None,
     ) -> ConversationHistory:
         """
@@ -168,6 +175,9 @@ class SQLiteWhatsAppConversationRepository:
                         (binding_id, business_id),
                     ).fetchall()
 
+                    if max_turns is not None:
+                        rows = rows[-max_turns:]
+
                     return ConversationHistory(
                         business_id=business_id,
                         turns=tuple(
@@ -229,32 +239,6 @@ class SQLiteWhatsAppConversationRepository:
                 ),
             )
 
-            # Retain only the newest complete exchanges.
-            keep_rows = max_turns
-
-            connection.execute(
-                """
-                DELETE FROM whatsapp_conversation_turns
-                WHERE binding_id = ?
-                  AND business_id = ?
-                  AND sequence NOT IN (
-                      SELECT sequence
-                      FROM whatsapp_conversation_turns
-                      WHERE binding_id = ?
-                        AND business_id = ?
-                      ORDER BY sequence DESC
-                      LIMIT ?
-                  )
-                """,
-                (
-                    binding_id,
-                    business_id,
-                    binding_id,
-                    business_id,
-                    keep_rows,
-                ),
-            )
-
             rows = connection.execute(
                 """
                 SELECT
@@ -268,6 +252,9 @@ class SQLiteWhatsAppConversationRepository:
                 """,
                 (binding_id, business_id),
             ).fetchall()
+
+            if max_turns is not None:
+                rows = rows[-max_turns:]
 
             turns = tuple(
                 ConversationTurn(
@@ -321,8 +308,11 @@ def _validate_identifier(value: object, name: str) -> None:
 
 
 def _validate_max_turns(max_turns: object) -> None:
+    if max_turns is None:
+        return
+
     if not isinstance(max_turns, int) or isinstance(max_turns, bool):
-        raise TypeError("max_turns must be an integer.")
+        raise TypeError("max_turns must be an integer or None.")
 
     if max_turns < 2:
         raise ValueError("max_turns must be at least 2.")

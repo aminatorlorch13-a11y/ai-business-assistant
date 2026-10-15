@@ -246,3 +246,33 @@ def test_session_scope_constraints_reject_invalid_combinations(tmp_path):
                 base[4],
             ),
         )
+
+
+def test_memory_id_cannot_be_taken_over_by_another_business(tmp_path):
+    db = make_db(tmp_path)
+    businesses = SQLiteBusinessRepository(db)
+    businesses.save(make_business("a"))
+    businesses.save(make_business("b"))
+    repo = SQLiteMemoryRepository(db)
+
+    original = Memory("shared-id", "a", "secret-a", "business_rule", 5)
+    repo.save(original)
+
+    with pytest.raises(ValueError, match="already belongs"):
+        repo.save(Memory("shared-id", "b", "stolen", "business_rule", 1))
+
+    assert repo.get("shared-id") == original
+    assert repo.list_for_business("a") == [original]
+    assert repo.list_for_business("b") == []
+
+
+def test_memory_owner_can_update_existing_memory(tmp_path):
+    db = make_db(tmp_path)
+    SQLiteBusinessRepository(db).save(make_business("a"))
+    repo = SQLiteMemoryRepository(db)
+
+    repo.save(Memory("owned-id", "a", "before", "business_rule", 2))
+    updated = Memory("owned-id", "a", "after", "business_rule", 4)
+
+    assert repo.save(updated) == updated
+    assert repo.get("owned-id") == updated

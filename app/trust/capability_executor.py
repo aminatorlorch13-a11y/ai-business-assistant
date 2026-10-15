@@ -63,17 +63,13 @@ class CapabilityExecutor:
         self._router = router
         self._safety_enforcement = safety_enforcement
 
-    def execute(
+    def authorize(
         self,
         request: CapabilityExecutionRequest,
         *,
         tenant: TenantContext,
-    ) -> CapabilityExecutionResult:
-        """
-        Authorize, safety-check, and route one concrete capability operation.
-
-        Denied requests never reach the capability router.
-        """
+    ) -> None:
+        """Check execution authority and safety without routing an operation."""
         if not isinstance(
             request,
             CapabilityExecutionRequest,
@@ -119,6 +115,21 @@ class CapabilityExecutor:
             self._safety_enforcement.require_integration_allowed(
                 request.integration
             )
+
+        return None
+
+    def execute(
+        self,
+        request: CapabilityExecutionRequest,
+        *,
+        tenant: TenantContext,
+    ) -> CapabilityExecutionResult:
+        """
+        Authorize, safety-check, and route one concrete capability operation.
+
+        Denied requests never reach the capability router.
+        """
+        self.authorize(request, tenant=tenant)
 
         result = self._router.route(request)
 

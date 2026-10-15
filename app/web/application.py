@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from dataclasses import asdict
 from typing import Callable, Protocol
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for, g
 
 from app.assistant.message import AssistantMessage
+from app.assistant.conversation import ConversationHistory
 from app.assistant.response import AssistantResponse
 from app.assistant.orchestrator import AssistantOrchestrator
 from app.assistant.structured_processor import StructuredAssistantProcessor
+from app.ai.errors import AIProviderError
 from app.ai.groq_config import GroqConfig
 from app.ai.groq_provider import GroqHTTPProvider
 from app.ai.structured_provider import ParsedRawAIProvider
@@ -33,6 +36,7 @@ from app.models.voice import SUPPORTED_VOICES
 from app.persistence.business_repository import SQLiteBusinessRepository
 from app.persistence.credential_repository import SQLiteCredentialRepository
 from app.persistence.database import SQLiteDatabase
+from app.persistence.web_conversation import SQLiteWebConversationRepository
 from app.persistence.membership_repository import SQLiteMembershipRepository
 from app.persistence.session import SQLiteSessionRepository
 from app.persistence.user_repository import SQLiteUserRepository
@@ -53,7 +57,16 @@ from app.web.security import WebSecurityError
 
 
 class OrchestratorLike(Protocol):
-    def handle(self, message: AssistantMessage, confirmed: bool = False): ...
+    def handle(
+        self,
+        message: AssistantMessage,
+        confirmed: bool = False,
+        *,
+        tenant: TenantContext | None = None,
+        conversation_history: ConversationHistory | None = None,
+        channel: str | None = None,
+        integration: str | None = None,
+    ) -> AssistantResponse: ...
 
 
 RuntimeBuilder = Callable[[Business], OrchestratorLike]
@@ -65,6 +78,7 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
 
     db = database or SQLiteDatabase(os.getenv("ASSISTANT_DB_PATH", "data/assistant.sqlite3"))
     db.initialize()
+    web_conversations = SQLiteWebConversationRepository(db)
 
     users = SQLiteUserRepository(db)
     credentials = SQLiteCredentialRepository(db)
@@ -104,6 +118,7 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
 
     install_auth_hooks(app, auth_service)
     app.extensions["assistant_database"] = db
+    app.extensions["assistant_web_conversations"] = web_conversations
     app.extensions["assistant_businesses"] = businesses
     app.extensions["assistant_access"] = access
     app.extensions["assistant_founders"] = founders
@@ -674,14 +689,42 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
             principal=g.principal,
         )
 
-        result = builder(business).handle(
-            message,
-            tenant=tenant,
-            channel="web",
+        history = web_conversations.load_history(
+            user_id=g.principal.user_id,
+            business_id=business.business_id,
         )
+
+        try:
+            result = builder(business).handle(
+                message,
+                tenant=tenant,
+                conversation_history=history,
+                channel="web",
+            )
+        except AIProviderError:
+            return jsonify({
+                "error": (
+                    "The assistant is temporarily unavailable. "
+                    "Please try again shortly."
+                )
+            }), 503
+
         if not isinstance(result, AssistantResponse):
             return jsonify({"error": "Assistant returned an invalid response."}), 500
-        return jsonify({"assistant_name": result.assistant_name, "message": result.message, "should_speak": result.should_speak})
+
+        web_conversations.append_exchange(
+            user_id=g.principal.user_id,
+            business_id=business.business_id,
+            user_content=text,
+            assistant_content=result.message,
+            created_at=datetime.now(timezone.utc),
+        )
+
+        return jsonify({
+            "assistant_name": result.assistant_name,
+            "message": result.message,
+            "should_speak": result.should_speak,
+        })
 
     return app
 

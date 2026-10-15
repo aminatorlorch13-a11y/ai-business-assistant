@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
 from app.assistant.message import AssistantMessage
+from app.assistant.conversation import ConversationHistory, ConversationRole
+from app.ai.errors import AIProviderError
 from app.assistant.response import AssistantResponse
 from app.commercial.trial import BusinessTrial
 from app.persistence.database import SQLiteDatabase
@@ -24,6 +26,7 @@ class FakeOrchestrator:
         confirmed: bool = False,
         *,
         tenant=None,
+        conversation_history: ConversationHistory | None = None,
         channel: str | None = None,
         integration: str | None = None,
     ):
@@ -32,6 +35,7 @@ class FakeOrchestrator:
                 "message": message,
                 "confirmed": confirmed,
                 "tenant": tenant,
+                "conversation_history": conversation_history,
                 "channel": channel,
                 "integration": integration,
             }
@@ -43,12 +47,17 @@ class FakeOrchestrator:
         )
 
 
-def make_app(tmp_path):
+class FailingOrchestrator(FakeOrchestrator):
+    def handle(self, *args, **kwargs):
+        raise AIProviderError('provider API key=DO_NOT_LEAK')
+
+
+def make_app(tmp_path, orchestrator_factory=FakeOrchestrator):
     db = SQLiteDatabase(tmp_path / "assistant.sqlite3")
     orchestrators = []
 
     def runtime_builder(business):
-        orchestrator = FakeOrchestrator()
+        orchestrator = orchestrator_factory()
         orchestrators.append(orchestrator)
         return orchestrator
 
@@ -97,8 +106,29 @@ def test_signup_login_me_and_assistant_execution(tmp_path):
     orchestrators = app.extensions["test_orchestrators"]
     assert len(orchestrators) == 1
     assert len(orchestrators[0].calls) == 1
+    assert orchestrators[0].calls[0]["conversation_history"].turns == ()
     assert orchestrators[0].calls[0]["channel"] == "web"
     assert orchestrators[0].calls[0]["integration"] is None
+
+
+def test_provider_failure_returns_safe_503_response(tmp_path):
+    app, _ = make_app(tmp_path, orchestrator_factory=FailingOrchestrator)
+    client = app.test_client()
+    signup(client)
+    login(client)
+
+    response = client.post(
+        '/api/assistant/message',
+        json={'message': 'Hello'},
+        headers={'X-CSRF-Token': client.get_cookie('assistant_csrf').value},
+    )
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        'error': 'The assistant is temporarily unavailable. '
+                'Please try again shortly.'
+    }
+    assert 'DO_NOT_LEAK' not in response.get_data(as_text=True)
 
 
 def test_owner_can_change_assistant_configuration(tmp_path):
@@ -231,3 +261,69 @@ def test_cross_origin_state_change_is_rejected(tmp_path):
     token = csrf(client)
     response = client.post("/api/auth/login", json={"email": "owner@example.com", "password": "correct horse battery staple"}, headers={"X-CSRF-Token": token, "Origin": "https://attacker.example"})
     assert response.status_code == 403
+
+
+def test_web_conversation_history_persists_between_requests(tmp_path):
+    app, _ = make_app(tmp_path)
+    client = app.test_client()
+    signup(client)
+    login(client)
+    token = client.get_cookie("assistant_csrf").value
+
+    first = client.post(
+        "/api/assistant/message",
+        json={"message": "My project is called Amination."},
+        headers={"X-CSRF-Token": token},
+    )
+    second = client.post(
+        "/api/assistant/message",
+        json={"message": "What did I call my project?"},
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    orchestrator = app.extensions["test_orchestrators"][1]
+    history = orchestrator.calls[0]["conversation_history"]
+
+    assert [
+        (turn.role, turn.content)
+        for turn in history.turns
+    ] == [
+        (ConversationRole.USER, "My project is called Amination."),
+        (ConversationRole.ASSISTANT, "Received: My project is called Amination."),
+    ]
+
+
+def test_provider_failure_does_not_persist_incomplete_exchange(tmp_path):
+    app, _ = make_app(tmp_path, orchestrator_factory=FailingOrchestrator)
+    client = app.test_client()
+    signup(client)
+    login(client)
+    token = client.get_cookie("assistant_csrf").value
+
+    response = client.post(
+        "/api/assistant/message",
+        json={"message": "Do not save an incomplete exchange."},
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert response.status_code == 503
+
+    with app.extensions["assistant_database"].connection() as connection:
+        row = connection.execute(
+            """
+            SELECT u.user_id, m.business_id
+            FROM users AS u
+            JOIN business_memberships AS m ON m.user_id = u.user_id
+            WHERE u.email = ?
+            """,
+            ("owner@example.com",),
+        ).fetchone()
+
+    history = app.extensions["assistant_web_conversations"].load_history(
+        user_id=row["user_id"],
+        business_id=row["business_id"],
+    )
+    assert history.turns == ()

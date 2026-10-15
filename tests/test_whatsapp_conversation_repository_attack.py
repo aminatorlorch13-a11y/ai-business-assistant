@@ -315,7 +315,7 @@ def test_unknown_binding_cannot_load_or_append_history(tmp_path) -> None:
         )
 
 
-def test_history_is_bounded_to_24_turns_and_keeps_complete_exchanges(
+def test_history_retains_all_turns_and_keeps_complete_exchanges(
     tmp_path,
 ) -> None:
     database, repository = make_repository(tmp_path)
@@ -333,11 +333,11 @@ def test_history_is_bounded_to_24_turns_and_keeps_complete_exchanges(
         business_id=BUSINESS_1,
     )
 
-    assert len(history.turns) == 24
+    assert len(history.turns) == 38
     assert len(history.turns) % 2 == 0
 
-    assert history.turns[0].content == "user message 8"
-    assert history.turns[1].content == "assistant response 8"
+    assert history.turns[0].content == "user message 1"
+    assert history.turns[1].content == "assistant response 1"
 
     assert history.turns[-2].content == "user message 19"
     assert history.turns[-1].content == "assistant response 19"
@@ -628,7 +628,7 @@ def test_concurrent_appends_preserve_complete_exchange_pairs(
         business_id=BUSINESS_1,
     )
 
-    assert len(history.turns) == 24
+    assert len(history.turns) == 40
     assert len(history.turns) % 2 == 0
 
     for index in range(0, len(history.turns), 2):

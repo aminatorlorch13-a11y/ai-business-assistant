@@ -325,7 +325,7 @@ def test_inactive_binding_cannot_append_history(tmp_path):
         )
 
 
-def test_history_is_bounded_to_24_complete_turns(tmp_path):
+def test_history_retains_all_turns_by_default(tmp_path):
     database = make_database(tmp_path / "conversation.sqlite3")
 
     add_binding(
@@ -354,9 +354,9 @@ def test_history_is_bounded_to_24_complete_turns(tmp_path):
         business_id="business-1",
     )
 
-    assert len(history.turns) == 24
+    assert len(history.turns) == 30
 
-    assert history.turns[0].content == "user-3"
+    assert history.turns[0].content == "user-0"
     assert history.turns[-1].content == "assistant-14"
 
     for index in range(0, len(history.turns), 2):
@@ -653,3 +653,95 @@ def test_v2_to_v4_migration_creates_conversation_schema(tmp_path):
 
     assert version == str(SCHEMA_VERSION)
     assert table is not None
+
+
+def test_append_exchange_bounded_view_preserves_full_history(tmp_path):
+    database = make_database(tmp_path / "conversation.sqlite3")
+    add_binding(
+        database,
+        binding_id="binding-1",
+        provider="meta",
+        provider_account_id="account-1",
+        sender_id="+27111111111",
+        user_id="user-1",
+        business_id="business-1",
+    )
+    repo = repository(database)
+
+    for index in range(3):
+        repo.append_exchange(
+            binding_id="binding-1",
+            business_id="business-1",
+            user_content=f"user-{index}",
+            assistant_content=f"assistant-{index}",
+            created_at=now(),
+        )
+
+    bounded = repo.append_exchange(
+        binding_id="binding-1",
+        business_id="business-1",
+        user_content="user-3",
+        assistant_content="assistant-3",
+        created_at=now(),
+        max_turns=2,
+    )
+
+    assert [turn.content for turn in bounded.turns] == [
+        "user-3", "assistant-3"
+    ]
+    assert bounded.max_turns == 2
+
+    full = repo.load_history(
+        binding_id="binding-1",
+        business_id="business-1",
+    )
+    assert len(full.turns) == 8
+    assert full.turns[0].content == "user-0"
+    assert full.turns[-1].content == "assistant-3"
+
+
+def test_duplicate_exchange_bounded_view_preserves_full_history(tmp_path):
+    database = make_database(tmp_path / "conversation.sqlite3")
+    add_binding(
+        database,
+        binding_id="binding-1",
+        provider="meta",
+        provider_account_id="account-1",
+        sender_id="+27111111111",
+        user_id="user-1",
+        business_id="business-1",
+    )
+    repo = repository(database)
+
+    for index in range(3):
+        repo.append_exchange(
+            binding_id="binding-1",
+            business_id="business-1",
+            user_content=f"user-{index}",
+            assistant_content=f"assistant-{index}",
+            created_at=now(),
+            exchange_id=f"exchange-{index}",
+        )
+
+    bounded = repo.append_exchange(
+        binding_id="binding-1",
+        business_id="business-1",
+        user_content="duplicate user",
+        assistant_content="duplicate assistant",
+        created_at=now(),
+        exchange_id="exchange-0",
+        max_turns=2,
+    )
+
+    assert [turn.content for turn in bounded.turns] == [
+        "user-2", "assistant-2"
+    ]
+    assert bounded.max_turns == 2
+
+    full = repo.load_history(
+        binding_id="binding-1",
+        business_id="business-1",
+    )
+    assert len(full.turns) == 6
+    assert full.turns[0].content == "user-0"
+    assert full.turns[-1].content == "assistant-2"

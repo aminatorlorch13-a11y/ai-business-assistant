@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-DEFAULT_MAX_CONVERSATION_TURNS = 24
 
 
 class ConversationRole(Enum):
@@ -33,11 +32,11 @@ class ConversationTurn:
 
 @dataclass(frozen=True)
 class ConversationHistory:
-    """Bounded, immutable conversational history for one business."""
+    """Immutable conversational history, optionally bounded for working context."""
 
     business_id: str
     turns: tuple[ConversationTurn, ...] = ()
-    max_turns: int = DEFAULT_MAX_CONVERSATION_TURNS
+    max_turns: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.business_id, str) or not self.business_id.strip():
@@ -46,8 +45,12 @@ class ConversationHistory:
         if not isinstance(self.turns, tuple):
             raise TypeError("turns must be a tuple.")
 
-        if not isinstance(self.max_turns, int) or self.max_turns <= 0:
-            raise ValueError("max_turns must be a positive integer.")
+        if self.max_turns is not None and (
+            not isinstance(self.max_turns, int)
+            or isinstance(self.max_turns, bool)
+            or self.max_turns <= 0
+        ):
+            raise ValueError("max_turns must be a positive integer or None.")
 
         for turn in self.turns:
             if not isinstance(turn, ConversationTurn):
@@ -58,13 +61,13 @@ class ConversationHistory:
                     "Conversation turn does not belong to this business."
                 )
 
-        if len(self.turns) > self.max_turns:
+        if self.max_turns is not None and len(self.turns) > self.max_turns:
             raise ValueError(
                 "Conversation history cannot contain more than max_turns entries."
             )
 
     def append(self, turn: ConversationTurn) -> "ConversationHistory":
-        """Return a new bounded history containing the supplied turn."""
+        """Return a new history containing the supplied turn."""
 
         if not isinstance(turn, ConversationTurn):
             raise TypeError("turn must be a ConversationTurn.")
@@ -76,7 +79,7 @@ class ConversationHistory:
 
         updated_turns = self.turns + (turn,)
 
-        if len(updated_turns) > self.max_turns:
+        if self.max_turns is not None and len(updated_turns) > self.max_turns:
             updated_turns = updated_turns[-self.max_turns :]
 
         return ConversationHistory(

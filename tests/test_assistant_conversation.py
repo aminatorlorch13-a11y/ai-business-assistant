@@ -1,7 +1,6 @@
 import pytest
 
 from app.assistant.conversation import (
-    DEFAULT_MAX_CONVERSATION_TURNS,
     ConversationHistory,
     ConversationRole,
     ConversationTurn,
@@ -14,7 +13,7 @@ def test_empty_history_is_valid():
     assert history.business_id == "business-1"
     assert history.turns == ()
     assert history.is_empty is True
-    assert history.max_turns == DEFAULT_MAX_CONVERSATION_TURNS
+    assert history.max_turns is None
 
 
 def test_append_returns_new_history_and_preserves_order():
@@ -70,12 +69,12 @@ def test_history_is_bounded_to_max_turns():
     assert len(history.turns) == 2
 
 
-def test_default_history_limit_is_enforced_under_long_conversation():
+def test_default_history_retains_all_turns_in_long_conversation():
     history = ConversationHistory(
         business_id="business-1",
     )
 
-    for number in range(1, DEFAULT_MAX_CONVERSATION_TURNS + 7):
+    for number in range(1, 257):
         history = history.append(
             ConversationTurn(
                 business_id="business-1",
@@ -84,12 +83,12 @@ def test_default_history_limit_is_enforced_under_long_conversation():
             )
         )
 
-    assert history.max_turns == DEFAULT_MAX_CONVERSATION_TURNS
-    assert len(history.turns) == DEFAULT_MAX_CONVERSATION_TURNS
+    assert history.max_turns is None
+    assert len(history.turns) == 256
 
     assert [turn.content for turn in history.turns] == [
         f"Turn {number}"
-        for number in range(7, DEFAULT_MAX_CONVERSATION_TURNS + 7)
+        for number in range(1, 257)
     ]
 
     assert all(

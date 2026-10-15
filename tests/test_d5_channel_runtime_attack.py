@@ -91,6 +91,18 @@ def create_business(database: SQLiteDatabase) -> Business:
         assistant_voice="female",
     )
     SQLiteBusinessRepository(database).save(business)
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO users(user_id, display_name, email)
+            VALUES (?, ?, ?)
+            """,
+            (
+                USER_ID,
+                "D5 Runtime User",
+                "d5-runtime-user@example.test",
+            ),
+        )
 
     SQLiteCommercialStateRepository(database).save(
         BusinessCommercialState(

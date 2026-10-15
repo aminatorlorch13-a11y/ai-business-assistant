@@ -1,4 +1,5 @@
 from unittest.mock import Mock
+from datetime import datetime, timezone
 
 import pytest
 
@@ -233,7 +234,10 @@ def make_structured_processor(provider, business_id):
     )
 
 
-def make_structured_confirmation_service():
+def make_structured_confirmation_service(
+    business_id: str,
+    user_id: str = "runtime-test-user",
+):
     temporary_directory = TemporaryDirectory(
         prefix="ai-business-assistant-confirmation-test-"
     )
@@ -241,8 +245,39 @@ def make_structured_confirmation_service():
         Path(temporary_directory.name) / "confirmation.sqlite3"
     )
     database.initialize()
+
+    # Seed the parent records required by confirmation foreign keys.
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO businesses(
+                business_id, name, owner_name, assistant_name, assistant_voice
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                business_id,
+                "Confirmation Test Business",
+                "Confirmation Test Owner",
+                "Confirmation Test Assistant",
+                "female",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO users(user_id, display_name, email)
+            VALUES (?, ?, ?)
+            """,
+            (
+                user_id,
+                "Confirmation Test User",
+                f"{user_id}@example.test",
+            ),
+        )
+
     service = CapabilityConfirmationService(
-        SQLiteCapabilityConfirmationRepository(database)
+        SQLiteCapabilityConfirmationRepository(database),
+        clock=lambda: datetime.now(timezone.utc),
     )
     return service, temporary_directory
 
@@ -272,7 +307,7 @@ def make_structured_orchestrator(
     )
 
     confirmation_service, confirmation_directory = (
-        make_structured_confirmation_service()
+        make_structured_confirmation_service(business.business_id)
     )
 
     orchestrator = AssistantOrchestrator(
@@ -373,17 +408,14 @@ def test_failed_interpretation_does_not_record_conversation_history():
 
 def test_failed_execution_does_not_record_conversation_history():
     business = make_business()
-
     provider = RecordingStructuredAIProvider(
         response_text=None,
         capability_requests=(make_structured_save_request(),),
     )
-
     processor = make_structured_processor(
         provider,
         business.business_id,
     )
-
     runtime = make_runtime_dependencies(business.business_id)
 
     executor = Mock(spec=CapabilityExecutor)
@@ -402,7 +434,7 @@ def test_failed_execution_does_not_record_conversation_history():
         business=business,
         orchestrator=orchestrator,
         speech_input_engine=RecordingSpeechInputEngine(
-            ["This action must not become completed history."]
+            ["Remember that this action must not become completed history."]
         ),
         speech_engine=RecordingSpeechEngine(),
         voice_service=VoiceService(),
@@ -415,20 +447,35 @@ def test_failed_execution_does_not_record_conversation_history():
         tenant=runtime.tenant,
     )
 
+    # The initial request should produce a confirmation, not execute the save.
+    response = coordinator.process_text_turn(
+        "Remember that this action must not become completed history."
+    )
+    marker = "Confirmation ID: "
+    assert marker in response.message
+    confirmation_id = response.message.split(marker, 1)[1].strip()
+    assert confirmation_id
+
+    history = coordinator.session.history
+    assert history is not None
+    assert history.business_id == business.business_id
+
+    # The request and confirmation response are legitimate completed turns.
+    recorded_turn_count = len(history.turns)
+    assert recorded_turn_count == 2
+    executor.execute.assert_not_called()
+
+    # A failed confirmed execution must not append a false assistant result.
     with pytest.raises(
         RuntimeError,
         match="Business execution failed.",
     ):
-        coordinator.process_text_turn(
-            "This action must not become completed history."
-        )
+        coordinator.process_confirmation(confirmation_id)
 
-    history = coordinator.session.history
-
-    assert history is not None
-    assert history.business_id == business.business_id
-    assert history.is_empty is True
-
+    history_after_failure = coordinator.session.history
+    assert history_after_failure is not None
+    assert len(history_after_failure.turns) == recorded_turn_count
+    executor.execute.assert_called_once()
 
 def test_speech_failure_preserves_completed_conversation_history():
     class FailingSpeechEngine(RecordingSpeechEngine):
@@ -525,7 +572,7 @@ def test_process_text_turn_uses_same_conversation_pipeline():
     assert provider.messages[0].content == "Hello by text."
 
 
-def test_coordinator_keeps_long_conversation_history_bounded():
+def test_coordinator_retains_long_conversation_history():
     business = make_business()
 
     provider = RecordingStructuredAIProvider(
@@ -573,24 +620,44 @@ def test_coordinator_keeps_long_conversation_history_bounded():
 
     final_history = provider.contexts[-1].conversation_history
 
+    # The provider receives completed prior exchanges, excluding the
+    # current message until the Assistant Core successfully responds.
     assert final_history.business_id == business.business_id
-    assert final_history.max_turns == 24
-    assert len(final_history.turns) == 24
+    assert final_history.max_turns is None
+    assert len(final_history.turns) == 58
 
-    expected_contents = []
-    for number in range(18, 30):
-        expected_contents.append(f"Conversation message {number}.")
-        expected_contents.append("Acknowledged.")
+    expected_prior_contents = []
+    for number in range(1, 30):
+        expected_prior_contents.append(f"Conversation message {number}.")
+        expected_prior_contents.append("Acknowledged.")
 
-    assert [turn.content for turn in final_history.turns] == expected_contents
-
+    assert [turn.content for turn in final_history.turns] == expected_prior_contents
     assert all(
         turn.business_id == business.business_id
         for turn in final_history.turns
     )
-
     assert final_history.turns[0].role == ConversationRole.USER
     assert final_history.turns[-1].role == ConversationRole.ASSISTANT
+
+    # The session itself must retain all 30 completed exchanges.
+    complete_history = session.history
+    assert complete_history is not None
+    assert complete_history.business_id == business.business_id
+    assert complete_history.max_turns is None
+    assert len(complete_history.turns) == 60
+
+    expected_complete_contents = []
+    for number in range(1, 31):
+        expected_complete_contents.append(f"Conversation message {number}.")
+        expected_complete_contents.append("Acknowledged.")
+
+    assert [turn.content for turn in complete_history.turns] == expected_complete_contents
+    assert all(
+        turn.business_id == business.business_id
+        for turn in complete_history.turns
+    )
+    assert complete_history.turns[0].role == ConversationRole.USER
+    assert complete_history.turns[-1].role == ConversationRole.ASSISTANT
 
 
 def test_new_conversation_session_starts_with_empty_history():

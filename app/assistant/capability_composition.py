@@ -177,7 +177,7 @@ def build_production_capability_composition(
     operation_policy = CapabilityOperationPolicy(
         confirmation_by_operation={
             Capability.MEMORY: {
-                "save": False,
+                "save": True,
                 "get": False,
                 "list": False,
                 "delete": True,

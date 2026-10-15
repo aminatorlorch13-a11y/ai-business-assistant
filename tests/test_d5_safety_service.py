@@ -879,3 +879,27 @@ def test_founder_action_creates_audit_event(tmp_path):
         and event.business_id == "business-1"
         for event in recent
     )
+
+def test_safety_enforcement_fails_closed_when_control_lookup_fails(
+    tmp_path, monkeypatch
+):
+    from app.safety.enforcement import SafetyExecutionDenied
+
+    _, _, _, safety, _, _ = _setup(tmp_path)
+    enforcement = SafetyEnforcement(safety)
+    calls = []
+
+    def fail_lookup(scope, target):
+        calls.append((scope, target))
+        raise RuntimeError("controlled repository failure")
+
+    monkeypatch.setattr(safety, "get_active_control", fail_lookup)
+
+    with pytest.raises(
+        SafetyExecutionDenied,
+        match="could not be verified",
+    ) as captured:
+        enforcement.require_execution_allowed("business-1")
+
+    assert isinstance(captured.value.__cause__, RuntimeError)
+    assert calls == [(SafetyControlScope.GLOBAL, "platform")]

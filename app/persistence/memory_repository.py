@@ -23,14 +23,18 @@ class SQLiteMemoryRepository:
         self._validate_id(memory.business_id)
         with self._database.connection() as connection:
             try:
-                connection.execute(
+                cursor = connection.execute(
                     """INSERT INTO memories(memory_id, business_id, content, memory_type, importance)
                        VALUES (?, ?, ?, ?, ?)
                        ON CONFLICT(memory_id) DO UPDATE SET
-                         business_id=excluded.business_id, content=excluded.content,
-                         memory_type=excluded.memory_type, importance=excluded.importance""",
+                         content=excluded.content,
+                         memory_type=excluded.memory_type,
+                         importance=excluded.importance
+                       WHERE memories.business_id = excluded.business_id""",
                     (memory.memory_id, memory.business_id, memory.content, memory.memory_type, memory.importance),
                 )
+                if cursor.rowcount == 0:
+                    raise ValueError("memory_id already belongs to another business.")
             except sqlite3.IntegrityError as exc:
                 raise ValueError("business_id does not reference an existing business.") from exc
         return memory

@@ -249,9 +249,17 @@ def test_orchestrator_executes_interpreted_action(tmp_path):
         content="Please remember that the customer prefers email.",
     )
 
+    tenant = make_tenant()
+    first = orchestrator.handle(
+        message,
+        tenant=tenant,
+    )
+    assert "Confirmation ID: " in first.message
+    confirmation_id = first.message.split("Confirmation ID: ", 1)[1]
     result = orchestrator.handle(
         message,
-        tenant=make_tenant(),
+        tenant=tenant,
+        confirmation_id=confirmation_id,
     )
 
     assert result.message == "Memory saved."
@@ -318,12 +326,23 @@ def test_orchestrator_does_not_return_success_when_execution_fails(tmp_path):
         commercial_access,
     )
 
+    tenant = make_tenant()
+    first = orchestrator.handle(
+        AssistantMessage(
+                business_id=BUSINESS_ID,
+                content="Please remember this.",
+            ),
+        tenant=tenant,
+    )
+    assert "Confirmation ID: " in first.message
+    confirmation_id = first.message.split("Confirmation ID: ", 1)[1]
     result = orchestrator.handle(
         AssistantMessage(
-            business_id=BUSINESS_ID,
-            content="Please remember this.",
-        ),
-        tenant=make_tenant(),
+                business_id=BUSINESS_ID,
+                content="Please remember this.",
+            ),
+        tenant=tenant,
+        confirmation_id=confirmation_id,
     )
 
     assert result.message == "Memory persistence failed."
@@ -357,12 +376,22 @@ def test_orchestrator_forwards_authenticated_tenant_to_executor(tmp_path):
 
     tenant = make_tenant()
 
+    first = orchestrator.handle(
+        AssistantMessage(
+                business_id=BUSINESS_ID,
+                content="Please remember this.",
+            ),
+        tenant=tenant,
+    )
+    assert "Confirmation ID: " in first.message
+    confirmation_id = first.message.split("Confirmation ID: ", 1)[1]
     orchestrator.handle(
         AssistantMessage(
-            business_id=BUSINESS_ID,
-            content="Please remember this.",
-        ),
+                business_id=BUSINESS_ID,
+                content="Please remember this.",
+            ),
         tenant=tenant,
+        confirmation_id=confirmation_id,
     )
 
     executor.execute.assert_called_once()
@@ -453,7 +482,7 @@ def test_orchestrator_preserves_existing_web_execution_without_tenant(tmp_path):
 
     with pytest.raises(
         PermissionError,
-        match="Authenticated tenant context is required for capability execution",
+        match="Authenticated tenant context is required for capability confirmation",
     ):
         orchestrator.handle(
             AssistantMessage(
@@ -465,3 +494,32 @@ def test_orchestrator_preserves_existing_web_execution_without_tenant(tmp_path):
 
     processor.process.assert_called_once()
     executor.execute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("Remember that I prefer email.", True),
+        ("Please remember that I prefer email.", True),
+        ("Please save this to memory: I prefer email.", True),
+        ("Keep a note that I prefer email.", True),
+        ("Don't forget that I prefer email.", True),
+        ("What email service should I use?", False),
+        ("Can you remember that I prefer email?", False),
+        ("Can you remember that?", False),
+        ("I do not want you to remember that I prefer email.", False),
+        ("I don't want you to remember that I prefer email.", False),
+        ("Remember that I don't want this stored.", False),
+        ("Remember that I do not consent to saving this.", False),
+        ("Please do not save this to memory.", False),
+        ("Please do not store this in memory.", False),
+        ("The assistant suggests saving my email preference.", False),
+        ("I was going to ask you to remember that I prefer email.", False),
+        ("", False),
+    ],
+)
+def test_memory_save_requires_clear_affirmative_consent(content, expected):
+    assert (
+        AssistantOrchestrator._user_explicitly_requested_memory_save(content)
+        is expected
+    )
