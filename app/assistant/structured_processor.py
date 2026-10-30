@@ -112,13 +112,15 @@ class StructuredAssistantProcessor:
             )
 
         memory_context = self._memory_context_builder.build(
-            message.business_id
+            message.business_id,
+            query=message.content,
         )
 
         context = AIContext(
             memory_context,
             conversation_history=conversation_history,
             automation_context=automation_context,
+            query=message.content,
         )
 
         return self._ai_provider.generate(

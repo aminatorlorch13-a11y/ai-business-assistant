@@ -11,6 +11,7 @@ class AIContext:
         memory_context: MemoryContext,
         conversation_history: ConversationHistory | None = None,
         automation_context: AutomationContext | None = None,
+        query: str | None = None,
     ) -> None:
         if not isinstance(memory_context, MemoryContext):
             raise TypeError("memory_context must be a MemoryContext.")
@@ -30,6 +31,9 @@ class AIContext:
             raise TypeError(
                 "automation_context must be an AutomationContext or None."
             )
+
+        if query is not None and not isinstance(query, str):
+            raise TypeError("query must be a string or None.")
 
         business_id = memory_context.business_id
 
@@ -54,6 +58,12 @@ class AIContext:
         self._memory_context = memory_context
         self._conversation_history = conversation_history
         self._automation_context = automation_context
+        self._query = query
+
+    @property
+    def query(self) -> str | None:
+        """Return the current request used for context retrieval."""
+        return self._query
 
     @property
     def memory_context(self) -> MemoryContext:

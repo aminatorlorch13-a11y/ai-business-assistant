@@ -123,6 +123,7 @@ class AssistantProcessor:
             memory_context,
             conversation_history=conversation_history,
             automation_context=automation_context,
+            query=message.content,
         )
 
         return self._ai_provider.interpret(

@@ -9,7 +9,10 @@ from app.assistant.conversation import (
 from app.memory.context import MemoryContext
 
 
-def make_context(contents: list[tuple[ConversationRole, str]]) -> AIContext:
+def make_context(
+    contents: list[tuple[ConversationRole, str]],
+    query: str | None = None,
+) -> AIContext:
     business_id = "business-001"
     history = ConversationHistory(
         business_id=business_id,
@@ -25,6 +28,7 @@ def make_context(contents: list[tuple[ConversationRole, str]]) -> AIContext:
     return AIContext(
         memory_context=MemoryContext(business_id=business_id, memories=()),
         conversation_history=history,
+        query=query,
     )
 
 
@@ -107,3 +111,76 @@ def test_builder_rejects_invalid_context():
 
     with pytest.raises(TypeError, match="AIContext"):
         PrivacyContextBuilder().build(object())
+
+
+def test_builder_recovers_older_relevant_turns_and_keeps_recent_context():
+    builder = PrivacyContextBuilder()
+    builder.MAX_CONVERSATION_CHARS = 320
+
+    context = make_context([
+        (ConversationRole.USER, "Unrelated old discussion about gardening."),
+        (
+            ConversationRole.ASSISTANT,
+            "The account reference is ORBIT-742 and belongs to the customer.",
+        ),
+        (
+            ConversationRole.USER,
+            "Another unrelated historical discussion about football.",
+        ),
+        (
+            ConversationRole.USER,
+            "What should we work on in the current session?",
+        ),
+        (
+            ConversationRole.ASSISTANT,
+            "We should review the current project tasks together.",
+        ),
+    ], query="What is the ORBIT-742 customer account reference?")
+
+    rendered = builder.build(context).conversation_text
+
+    assert len(rendered) <= builder.MAX_CONVERSATION_CHARS
+    assert "ORBIT-742" in rendered
+    assert "current session" in rendered
+    assert "current project tasks" in rendered
+    assert "gardening" not in rendered
+    assert "football" not in rendered
+
+    assert rendered.index("ORBIT-742") < (
+        rendered.index("current session")
+    ) < rendered.index("current project tasks")
+
+
+def test_builder_keeps_recent_context_when_query_has_no_useful_terms():
+    builder = PrivacyContextBuilder()
+    builder.MAX_CONVERSATION_CHARS = 240
+
+    context = make_context([
+        (ConversationRole.USER, "Older discussion " + "A" * 100),
+        (ConversationRole.ASSISTANT, "Recent answer to preserve"),
+        (ConversationRole.USER, "Latest question to preserve"),
+    ], query="What is it?")
+
+    rendered = builder.build(context).conversation_text
+
+    assert len(rendered) <= builder.MAX_CONVERSATION_CHARS
+    assert "Recent answer to preserve" in rendered
+    assert "Latest question to preserve" in rendered
+
+
+def test_builder_does_not_duplicate_turns_during_retrieval():
+    builder = PrivacyContextBuilder()
+    builder.MAX_CONVERSATION_CHARS = 225
+
+    context = make_context([
+        (ConversationRole.USER, "ORBIT-742 customer account reference"),
+        (ConversationRole.ASSISTANT, "The reference is ORBIT-742."),
+        (ConversationRole.USER, "Recent unrelated question."),
+        (ConversationRole.ASSISTANT, "Recent unrelated answer."),
+    ], query="Find ORBIT-742 customer account reference")
+
+    rendered = builder.build(context).conversation_text
+
+    assert rendered.count("ORBIT-742 customer account reference") == 1
+    assert rendered.count("Recent unrelated question.") == 1
+    assert rendered.count("Recent unrelated answer.") == 1

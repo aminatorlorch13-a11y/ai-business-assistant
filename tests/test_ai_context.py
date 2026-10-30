@@ -182,3 +182,26 @@ def test_automation_context_rejects_nested_list_mutation():
 
     with pytest.raises(AttributeError):
         context.payload["tags"].append("tampered")
+
+
+def test_ai_context_exposes_query_for_context_retrieval():
+    context = AIContext(
+        MemoryContext(
+            business_id="business-001",
+            memories=(),
+        ),
+        query="Find the ORBIT-742 customer account.",
+    )
+
+    assert context.query == "Find the ORBIT-742 customer account."
+
+
+def test_ai_context_rejects_invalid_query_type():
+    with pytest.raises(TypeError, match="query"):
+        AIContext(
+            MemoryContext(
+                business_id="business-001",
+                memories=(),
+            ),
+            query=123,
+        )
