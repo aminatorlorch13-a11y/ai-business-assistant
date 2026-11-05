@@ -57,7 +57,7 @@ def test_fresh_database_initializes_at_current_schema(tmp_path):
     db = SQLiteDatabase(tmp_path / "fresh.db")
     db.initialize()
 
-    assert SCHEMA_VERSION == 14
+    assert SCHEMA_VERSION == 17
     assert _schema_version(db) == SCHEMA_VERSION
 
     assert _table_names(db) == {
@@ -76,6 +76,17 @@ def test_v7_database_migrates_to_current_schema_without_losing_existing_data(tmp
         connection.execute("DROP TABLE safety_controls")
         connection.execute("DROP TABLE safety_incidents")
         connection.execute("DROP TABLE capability_confirmations")
+        for table in (
+            "business_capability_grants",
+            "business_capability_entitlements",
+            "web_conversation_turns",
+            "voice_conversation_turns",
+            "voice_conversations",
+            "forge_artifacts",
+            "forge_projects",
+        ):
+            connection.execute(f"DROP TABLE IF EXISTS {table}")
+
 
         connection.execute(
             """
@@ -205,6 +216,17 @@ def test_v8_to_v9_preserves_safety_incident_and_control_data(tmp_path):
         )
 
         connection.execute("DROP TABLE capability_confirmations")
+        for table in (
+            "business_capability_grants",
+            "business_capability_entitlements",
+            "web_conversation_turns",
+            "voice_conversation_turns",
+            "voice_conversations",
+            "forge_artifacts",
+            "forge_projects",
+        ):
+            connection.execute(f"DROP TABLE IF EXISTS {table}")
+
 
         connection.execute(
             """
@@ -510,6 +532,9 @@ def test_v13_to_v14_creates_voice_history(tmp_path):
         )
         connection.execute("DROP TABLE IF EXISTS voice_conversation_turns")
         connection.execute("DROP TABLE IF EXISTS voice_conversations")
+        connection.execute("DROP TABLE IF EXISTS forge_artifacts")
+        connection.execute("DROP TABLE IF EXISTS forge_projects")
+
         connection.execute(
             """
             UPDATE persistence_metadata
@@ -520,7 +545,7 @@ def test_v13_to_v14_creates_voice_history(tmp_path):
 
     assert _schema_version(db) == 13
     db.initialize()
-    assert _schema_version(db) == 14
+    assert _schema_version(db) == SCHEMA_VERSION
 
     with db.connection() as connection:
         tables = {

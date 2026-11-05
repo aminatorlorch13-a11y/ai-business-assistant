@@ -79,6 +79,230 @@ function addMessage(who,text){
     box.scrollTop=box.scrollHeight;
 }
 
+
+let sharedSpeechAudioContext = null;
+let activeSpeechPlayback = null;
+let speechRequestSequence = 0;
+
+function dispatchAssistantState(state) {
+    window.dispatchEvent(new CustomEvent('amination:state', {
+        detail: {state}
+    }));
+}
+
+function dispatchAssistantAudioLevel(level) {
+    window.dispatchEvent(new CustomEvent('amination:audio-level', {
+        detail: {level}
+    }));
+}
+
+function prepareSpeechAudioContext() {
+    const AudioContextClass =
+        window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) return null;
+
+    try {
+        if (!sharedSpeechAudioContext) {
+            sharedSpeechAudioContext = new AudioContextClass();
+        }
+
+        if (sharedSpeechAudioContext.state === 'suspended') {
+            const resumeResult = sharedSpeechAudioContext.resume();
+            if (resumeResult && typeof resumeResult.catch === 'function') {
+                resumeResult.catch(() => {});
+            }
+        }
+
+        return sharedSpeechAudioContext;
+    } catch (error) {
+        return null;
+    }
+}
+
+function finishAssistantSpeech(playback, stopSource = false) {
+    if (activeSpeechPlayback !== playback) return;
+
+    activeSpeechPlayback = null;
+
+    if (playback.animationFrame) {
+        cancelAnimationFrame(playback.animationFrame);
+    }
+
+    if (playback.source) {
+        playback.source.onended = null;
+
+        if (stopSource) {
+            try {
+                playback.source.stop();
+            } catch (error) {
+                // The source may already have stopped.
+            }
+        }
+
+        try {
+            playback.source.disconnect();
+        } catch (error) {
+            // Already disconnected.
+        }
+    }
+
+    if (playback.analyser) {
+        try {
+            playback.analyser.disconnect();
+        } catch (error) {
+            // Already disconnected.
+        }
+    }
+
+    if (playback.audio) {
+        playback.audio.onended = null;
+        playback.audio.onerror = null;
+        playback.audio.onplay = null;
+        playback.audio.pause();
+        playback.audio.removeAttribute('src');
+        playback.audio.load();
+    }
+
+    if (playback.objectUrl) {
+        URL.revokeObjectURL(playback.objectUrl);
+    }
+
+    dispatchAssistantAudioLevel(0);
+    dispatchAssistantState('idle');
+}
+
+function stopAssistantSpeech() {
+    if (activeSpeechPlayback) {
+        finishAssistantSpeech(activeSpeechPlayback, true);
+    } else {
+        dispatchAssistantAudioLevel(0);
+    }
+}
+
+async function playAssistantSpeech(data, audioContext, requestId) {
+    if (
+        !data ||
+        data.speech_available !== true ||
+        typeof data.speech_audio_base64 !== 'string' ||
+        !data.speech_audio_base64
+    ) {
+        throw new Error('No playable speech audio was returned.');
+    }
+
+    if (requestId !== speechRequestSequence) return;
+
+    const binary = atob(data.speech_audio_base64);
+    const bytes = new Uint8Array(binary.length);
+
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+
+    const blob = new Blob([bytes], {
+        type: data.speech_mime_type || 'audio/mpeg'
+    });
+
+    const playback = {
+        source: null,
+        analyser: null,
+        animationFrame: null,
+        audio: null,
+        objectUrl: URL.createObjectURL(blob)
+    };
+
+    activeSpeechPlayback = playback;
+
+    if (audioContext) {
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+        }
+
+        if (requestId !== speechRequestSequence) {
+            finishAssistantSpeech(playback, false);
+            return;
+        }
+
+        const audioBuffer = await audioContext.decodeAudioData(
+            bytes.buffer.slice(0)
+        );
+
+        if (requestId !== speechRequestSequence) {
+            finishAssistantSpeech(playback, false);
+            return;
+        }
+
+        const source = audioContext.createBufferSource();
+        const analyser = audioContext.createAnalyser();
+
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.72;
+
+        source.buffer = audioBuffer;
+        source.connect(analyser);
+        analyser.connect(audioContext.destination);
+
+        playback.source = source;
+        playback.analyser = analyser;
+
+        const samples = new Float32Array(analyser.fftSize);
+
+        function measureAudio() {
+            if (activeSpeechPlayback !== playback) return;
+
+            analyser.getFloatTimeDomainData(samples);
+
+            let squareSum = 0;
+
+            for (let i = 0; i < samples.length; i++) {
+                squareSum += samples[i] * samples[i];
+            }
+
+            const rms = Math.sqrt(squareSum / samples.length);
+            const level = Math.min(1, rms * 8);
+
+            dispatchAssistantAudioLevel(level);
+
+            playback.animationFrame =
+                requestAnimationFrame(measureAudio);
+        }
+
+        source.onended = () => {
+            finishAssistantSpeech(playback, false);
+        };
+
+        dispatchAssistantState('speaking');
+        source.start(0);
+        measureAudio();
+        return;
+    }
+
+    // Playback remains available on browsers without Web Audio support.
+    const audio = new Audio(playback.objectUrl);
+    playback.audio = audio;
+
+    audio.onplay = () => {
+        if (activeSpeechPlayback === playback) {
+            dispatchAssistantState('speaking');
+        }
+    };
+
+    audio.onended = () => {
+        finishAssistantSpeech(playback, false);
+    };
+
+    audio.onerror = () => {
+        finishAssistantSpeech(playback, false);
+    };
+
+    try {
+        await audio.play();
+    } catch (error) {
+        finishAssistantSpeech(playback, false);
+        throw new Error('The browser could not start audio playback.');
+    }
+}
+
 function wireDashboard(){
     document.getElementById('logout').onclick=async()=>{
         try{
@@ -95,7 +319,20 @@ function wireDashboard(){
         const text=f.get('message');
         const err=document.getElementById('assistant-error');
 
+        if(typeof text !== 'string' || !text.trim()){
+            return;
+        }
+
         err.textContent='';
+
+        const requestId = ++speechRequestSequence;
+
+        stopAssistantSpeech();
+
+        // Unlock the browser audio engine during the user's Send gesture.
+        const audioContext = prepareSpeechAudioContext();
+
+        dispatchAssistantState('processing');
         addMessage('user',text);
         e.target.reset();
 
@@ -105,9 +342,40 @@ function wireDashboard(){
                 body:JSON.stringify({message:text})
             });
 
+            if(requestId !== speechRequestSequence){
+                return;
+            }
+
             addMessage('assistant',data.message);
+
+            if(data.speech_available === true){
+                try{
+                    await playAssistantSpeech(
+                        data,
+                        audioContext,
+                        requestId
+                    );
+                }catch(speechError){
+                    if(requestId === speechRequestSequence){
+                        err.textContent =
+                            'Your text response is ready, but voice playback failed.';
+                        stopAssistantSpeech();
+                    }
+                }
+            }else{
+                if(data.speech_error){
+                    err.textContent=data.speech_error;
+                }
+
+                dispatchAssistantAudioLevel(0);
+                dispatchAssistantState('idle');
+            }
         }catch(x){
-            err.textContent=x.message;
+            if(requestId === speechRequestSequence){
+                err.textContent=x.message;
+                stopAssistantSpeech();
+                dispatchAssistantState('idle');
+            }
         }
     };
 
@@ -118,16 +386,27 @@ function wireDashboard(){
         const msg=document.getElementById('config-message');
 
         try{
-            await api('/api/business/config',{
+            const saved = await api('/api/business/config',{
                 method:'POST',
                 body:JSON.stringify(Object.fromEntries(f))
             });
 
-            msg.textContent='Saved.';
+            const voiceLabel =
+                saved.assistant_voice === 'female' ? 'Female' : 'Male';
+            msg.textContent = `Saved. ${voiceLabel} voice selected for new replies.`;
         }catch(x){
             msg.textContent=x.message;
         }
     };
+
+    document.querySelectorAll(
+        '#config-form input[name="assistant_voice"]'
+    ).forEach(input => {
+        input.addEventListener('change', () => {
+            const form = document.getElementById('config-form');
+            if (form) form.requestSubmit();
+        });
+    });
 }
 
 function founderValue(value){

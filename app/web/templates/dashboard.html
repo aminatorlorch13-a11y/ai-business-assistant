@@ -1,1 +1,114 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ business.name }} — Assistant</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head><body><main class="dashboard"><header><div><p class="eyebrow">{{ business.name }}</p><h1>{{ business.assistant_name }}</h1><p class="muted">Your configured business assistant</p></div><button id="logout" class="secondary">Sign out</button></header><section class="grid"><article class="card"><h2>Talk to your assistant</h2><div id="messages" class="messages"></div><form id="assistant-form"><input name="message" placeholder="Say what you need…" autocomplete="off" required><button>Send</button></form><p id="assistant-error" class="error"></p></article><article class="card"><h2>Assistant setup</h2><form id="config-form"><label>Assistant name<input name="assistant_name" value="{{ business.assistant_name }}" required></label><label>Voice<select name="assistant_voice"><option value="male" {% if business.assistant_voice=='male' %}selected{% endif %}>Male</option><option value="female" {% if business.assistant_voice=='female' %}selected{% endif %}>Female</option></select></label><button>Save setup</button></form><p id="config-message" class="muted"></p><hr><p><strong>Access:</strong> {{ access.status.value }}</p><p class="muted">{{ access.reason }}</p></article></section></main><script src="{{ url_for('static', filename='app.js') }}"></script><script>wireDashboard();</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#030509">
+    <title>{{ business.name }} — Amination AI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='living-spectrum.css') }}">
+</head>
+<body class="ls-body">
+<main class="ls-dashboard">
+    <header class="ls-header">
+        <div class="ls-brand">
+            <div class="ls-brand-mark">A</div>
+            <div>
+                <h1>AMINATION AI</h1>
+                <p>FROM IMAGINATION TO REALITY</p>
+            </div>
+        </div>
+        <div class="ls-header-actions">
+            <span class="ls-business">{{ business.name }}</span>
+            <button id="logout" class="secondary" type="button">Sign out</button>
+        </div>
+    </header>
+
+    <section class="ls-intro">
+        <span class="ls-kicker">YOUR INTELLIGENT BUSINESS PARTNER</span>
+        <h2>Good to have you here.</h2>
+        <p>Your workspace is ready. What shall we work on today?</p>
+    </section>
+
+    <section class="ls-stage" aria-label="Amination AI humanoid assistant">
+        <div id="ls-scene-fallback" role="status">
+            The 3D visual is unavailable on this device. Your assistant workspace is still ready below.
+        </div>
+        <canvas id="amination-scene" aria-label="Animated three-dimensional AI face"></canvas>
+        <div class="ls-stage-overlay">
+            <div class="ls-state">
+                <span class="ls-state-dot"></span>
+                <span id="ls-state-label">ASSEMBLING</span>
+            </div>
+            <div class="ls-stage-caption">AMINATION INTELLIGENCE</div>
+        </div>
+    </section>
+
+    <section class="ls-workspace">
+        <article class="ls-panel">
+            <div class="ls-panel-heading">
+                <h3>Conversation workspace</h3>
+                <span>LIVE ASSISTANT</span>
+            </div>
+            <div id="messages" class="messages ls-messages" aria-live="polite">
+                <div class="message assistant">
+                    Hello. I'm your business assistant. How can I help you today?
+                </div>
+            </div>
+            <form id="assistant-form" class="ls-chat-form">
+                <input name="message" placeholder="Ask me something or tell me what you need…" autocomplete="off" required aria-label="Message your assistant">
+                <button type="submit">Send</button>
+            </form>
+            <p id="assistant-error" class="error" role="alert"></p>
+        </article>
+
+        <aside class="ls-side-stack">
+            <section class="ls-info-card">
+                <h4>Your AI workspace</h4>
+                <p>Messages and assistant responses appear here. As we integrate more capabilities, this space will also present retrieved information, proposals and created work.</p>
+            </section>
+            <section class="ls-panel">
+                <div class="ls-panel-heading">
+                    <h3>Assistant settings</h3>
+                    <span>CONFIGURATION</span>
+                </div>
+                <form id="config-form" class="ls-config-form">
+                    <label>
+                        Assistant name
+                        <input name="assistant_name" value="" placeholder="Enter the correct assistant name" required>
+                    </label>
+                    <label>
+                        Voice
+                        <fieldset class="ls-voice-picker">
+                            <legend>Voice</legend>
+                            <div class="ls-voice-options">
+                                <label class="ls-voice-option">
+                                    <input type="radio" name="assistant_voice" value="male"
+                                        {% if business.assistant_voice == 'male' %}checked{% endif %}>
+                                    <span>Male</span>
+                                </label>
+                                <label class="ls-voice-option">
+                                    <input type="radio" name="assistant_voice" value="female"
+                                        {% if business.assistant_voice == 'female' %}checked{% endif %}>
+                                    <span>Female</span>
+                                </label>
+                            </div>
+                        </fieldset>
+                    </label>
+                    <button type="submit">Save settings</button>
+                </form>
+                <p id="config-message" class="muted" aria-live="polite"></p>
+            </section>
+        </aside>
+    </section>
+
+    <footer class="ls-footer">AMINATION AI · BUILT TO HELP BUSINESSES MOVE FORWARD</footer>
+</main>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+    wireDashboard();
+</script>
+<script type="module" src="{{ url_for('static', filename='living-spectrum.js') }}"></script>
+</body>
+</html>

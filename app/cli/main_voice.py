@@ -16,7 +16,7 @@ from app.voice.conversation_coordinator import (
     AssistantConversationCoordinator,
 )
 from app.voice.android_input_engine import AndroidSpeechInputEngine
-from app.voice.local_engine import AndroidSpeechEngine
+from app.voice.engine_factory import build_speech_engine
 from app.voice.message_adapter import ConversationMessageAdapter
 from app.voice.service import VoiceService
 from app.voice.session import ConversationSession
@@ -115,7 +115,7 @@ def main() -> None:
     _, orchestrator = build_orchestrator_for_business(business)
 
     speech_input_engine = AndroidSpeechInputEngine()
-    speech_engine = AndroidSpeechEngine()
+    speech_engine = build_speech_engine()
     voice_service = VoiceService()
     voice_configuration = VoiceConfiguration(
         voice=business.assistant_voice,

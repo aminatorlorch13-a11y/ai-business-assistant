@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 from datetime import datetime, timezone
 from dataclasses import asdict
@@ -33,6 +34,8 @@ from app.auth.signup import SQLiteSignupTransaction, SignupConflict
 from app.identity.models import UserRole
 from app.models.business import Business
 from app.models.voice import SUPPORTED_VOICES
+from app.voice.elevenlabs_engine import ElevenLabsConfig, ElevenLabsSpeechEngine
+from app.voice.request import SpeechRequest
 from app.persistence.business_repository import SQLiteBusinessRepository
 from app.persistence.credential_repository import SQLiteCredentialRepository
 from app.persistence.database import SQLiteDatabase
@@ -71,8 +74,17 @@ class OrchestratorLike(Protocol):
 
 RuntimeBuilder = Callable[[Business], OrchestratorLike]
 
+class SpeechSynthesizer(Protocol):
+    def synthesize(self, speech_request: SpeechRequest) -> bytes: ...
 
-def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: RuntimeBuilder | None = None, testing: bool = False) -> Flask:
+
+def create_app(
+    *,
+    database: SQLiteDatabase | None = None,
+    runtime_builder: RuntimeBuilder | None = None,
+    speech_synthesizer: SpeechSynthesizer | None = None,
+    testing: bool = False,
+) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config.update(TESTING=testing, MAX_CONTENT_LENGTH=64 * 1024, JSON_SORT_KEYS=False)
 
@@ -159,7 +171,9 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
 
     @app.get("/")
     def index():
-        return redirect(url_for("dashboard_page" if g.principal else "login_page"))
+        if g.principal:
+            return redirect(url_for("dashboard_page"))
+        return render_template("landing.html")
 
     @app.get("/login")
     def login_page():
@@ -720,11 +734,48 @@ def create_app(*, database: SQLiteDatabase | None = None, runtime_builder: Runti
             created_at=datetime.now(timezone.utc),
         )
 
-        return jsonify({
+        response_data = {
             "assistant_name": result.assistant_name,
             "message": result.message,
             "should_speak": result.should_speak,
-        })
+            "speech_available": False,
+        }
+
+        if result.should_speak:
+            try:
+                synthesizer = speech_synthesizer
+                if synthesizer is None:
+                    config = ElevenLabsConfig.from_environment()
+                    synthesizer = ElevenLabsSpeechEngine(config)
+
+                audio = synthesizer.synthesize(
+                    SpeechRequest(
+                        text=result.message,
+                        voice=business.assistant_voice,
+                        speed=0.90 if business.assistant_voice == "female" else 1.0,
+                    )
+                )
+
+                if not isinstance(audio, bytes) or not audio:
+                    raise RuntimeError("Speech provider returned invalid audio.")
+
+                if len(audio) > 8 * 1024 * 1024:
+                    raise RuntimeError("Speech response exceeded the web size limit.")
+
+                response_data["speech_audio_base64"] = (
+                    base64.b64encode(audio).decode("ascii")
+                )
+                response_data["speech_mime_type"] = "audio/mpeg"
+                response_data["speech_available"] = True
+
+            except Exception:
+                # Text remains available even when speech synthesis fails.
+                response_data["speech_error"] = (
+                    "Voice playback is unavailable right now. "
+                    "Your text response is ready."
+                )
+
+        return jsonify(response_data)
 
     return app
 

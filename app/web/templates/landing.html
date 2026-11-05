@@ -1,0 +1,203 @@
+
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#080808">
+    <meta name="description" content="Meet Amination AI — a business assistant built around the way you work.">
+    <meta property="og:type" content="website">
+    <meta property="og:locale" content="en_ZA">
+    <meta property="og:site_name" content="Amination AI">
+    <meta name="twitter:title" content="Amination AI — From Imagination to Reality">
+    <meta name="twitter:description" content="A business assistant built around the way you work.">
+    <meta property="og:title" content="Amination AI — From Imagination to Reality">
+    <meta property="og:description" content="A business assistant built around the way you work.">
+    <meta name="twitter:card" content="summary">
+
+    <title>Amination AI — From Imagination to Reality</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='landing.css') }}">
+</head>
+
+<body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <div class="landing-page">
+
+        <header class="topbar">
+            <a class="wordmark" href="/" aria-label="Amination AI home">
+                <span class="wordmark-name">AMINATION</span>
+                <span class="wordmark-ai">AI</span>
+            </a>
+
+            <nav class="top-nav" aria-label="Main navigation">
+                <a href="{{ url_for('login_page') }}">Sign in</a>
+                <a class="nav-cta" href="{{ url_for('signup_page') }}">
+                    Get started
+                </a>
+            </nav>
+        </header>
+
+        <main id="main-content" tabindex="-1">
+            <section class="hero">
+                <video class="landing-background-video"
+                       autoplay muted loop playsinline preload="metadata"
+                       aria-hidden="true" tabindex="-1">
+                    <source src="{{ url_for('static', filename='amination-background.mp4') }}"
+                            type="video/mp4">
+                </video>
+                <div class="landing-background-overlay"
+                     aria-hidden="true"></div>
+                <div class="hero-copy">
+
+                    <p class="eyebrow">
+                        <span></span>
+                        INTELLIGENCE WITH PURPOSE
+                    </p>
+
+                    <h1>
+                        Your business.<br>
+                        <span>Your imagination.</span><br>
+                        Your next move.
+                    </h1>
+
+                    <p class="hero-description">
+                        Meet Amination AI — a business assistant designed
+                        to help you think, communicate, and move forward
+                        with confidence.
+                    </p>
+
+                    <div class="hero-actions">
+                        <a class="button button-primary"
+                           href="{{ url_for('signup_page') }}">
+                            Create your account
+                            <span aria-hidden="true">↗</span>
+                        </a>
+
+                        <a class="button button-secondary"
+                           href="{{ url_for('login_page') }}">
+                            Sign in
+                        </a>
+                    </div>
+
+                    <p class="hero-note">
+                        A new way to bring your ideas into motion.
+                    </p>
+                </div>
+
+                <div class="hero-art" aria-hidden="true">
+                    <div class="orbit orbit-one"></div>
+                    <div class="orbit orbit-two"></div>
+                    <div class="orbit orbit-three"></div>
+
+                    <div class="core">
+                        <svg class="atom-visual" viewBox="0 0 240 240"
+                             xmlns="http://www.w3.org/2000/svg">
+                            <defs>
+                                <radialGradient id="atom-nucleus-gradient">
+                                    <stop offset="0%" stop-color="#fff7d6"/>
+                                    <stop offset="35%" stop-color="#f0d98e"/>
+                                    <stop offset="100%" stop-color="#a97822" stop-opacity=".2"/>
+                                </radialGradient>
+                                <radialGradient id="atom-electron-gradient">
+                                    <stop offset="0%" stop-color="#fff"/>
+                                    <stop offset="55%" stop-color="#f0d98e"/>
+                                    <stop offset="100%" stop-color="#d8b65b"/>
+                                </radialGradient>
+                            </defs>
+
+                            <g class="atom-spin atom-spin-one">
+                                <ellipse class="atom-ring" cx="120" cy="120"
+                                         rx="88" ry="31"/>
+                                <circle class="atom-electron" cx="208" cy="120" r="6"/>
+                            </g>
+
+                            <g transform="rotate(60 120 120)">
+                                <g class="atom-spin atom-spin-two">
+                                    <ellipse class="atom-ring" cx="120" cy="120"
+                                             rx="88" ry="31"/>
+                                    <circle class="atom-electron" cx="208" cy="120" r="6"/>
+                                </g>
+                            </g>
+
+                            <g transform="rotate(-60 120 120)">
+                                <g class="atom-spin atom-spin-three">
+                                    <ellipse class="atom-ring" cx="120" cy="120"
+                                             rx="88" ry="31"/>
+                                    <circle class="atom-electron" cx="208" cy="120" r="6"/>
+                                </g>
+                            </g>
+
+                            <circle class="atom-nucleus-glow" cx="120" cy="120" r="25"/>
+                            <circle class="atom-nucleus" cx="120" cy="120" r="15"/>
+                            <circle cx="115" cy="114" r="4"
+                                    fill="#fff7d6" opacity=".8"/>
+                        </svg>
+                    </div>
+
+                    <div class="art-label">
+                        IMAGINE <span>·</span> BUILD <span>·</span> GROW
+                    </div>
+                </div>
+            </section>
+
+            <section class="principles"
+                     aria-label="What Amination AI brings together">
+
+                <article class="principle">
+                    <span class="principle-number">01</span>
+                    <h2>Built around your business</h2>
+                    <p>
+                        Give your assistant a business identity and shape
+                        how it represents your work.
+                    </p>
+                </article>
+
+                <article class="principle">
+                    <span class="principle-number">02</span>
+                    <h2>Conversation that moves you forward</h2>
+                    <p>
+                        Bring your questions and day-to-day business
+                        thinking into one conversation.
+                    </p>
+                </article>
+
+                <article class="principle">
+                    <span class="principle-number">03</span>
+                    <h2>Your choice of voice</h2>
+                    <p>
+                        Choose the assistant voice that feels right
+                        for your experience.
+                    </p>
+                </article>
+            </section>
+
+            <section class="closing">
+                <p class="eyebrow">THE IDEA IS ONLY THE BEGINNING</p>
+
+                <img
+                    class="closing-logo"
+                    src="{{ url_for('static', filename='amination-logo.jpg') }}"
+                    alt="Amination — From Imagination to Reality"
+                    width="715"
+                    height="715"
+                    loading="lazy"
+                >
+
+                <a href="{{ url_for('signup_page') }}">
+                    Start building your experience
+                    <span aria-hidden="true">↗</span>
+                </a>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <span>AMINATION AI</span>
+            <span>From Imagination to Reality.</span>
+        </footer>
+
+    </div>
+</body>
+</html>

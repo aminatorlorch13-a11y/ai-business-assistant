@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime, timedelta, timezone
 
 from app.assistant.message import AssistantMessage
@@ -52,7 +53,11 @@ class FailingOrchestrator(FakeOrchestrator):
         raise AIProviderError('provider API key=DO_NOT_LEAK')
 
 
-def make_app(tmp_path, orchestrator_factory=FakeOrchestrator):
+def make_app(
+    tmp_path,
+    orchestrator_factory=FakeOrchestrator,
+    speech_synthesizer=None,
+):
     db = SQLiteDatabase(tmp_path / "assistant.sqlite3")
     orchestrators = []
 
@@ -64,6 +69,7 @@ def make_app(tmp_path, orchestrator_factory=FakeOrchestrator):
     app = create_app(
         database=db,
         runtime_builder=runtime_builder,
+        speech_synthesizer=speech_synthesizer,
         testing=True,
     )
     app.extensions["test_orchestrators"] = orchestrators
@@ -132,14 +138,42 @@ def test_provider_failure_returns_safe_503_response(tmp_path):
 
 
 def test_owner_can_change_assistant_configuration(tmp_path):
-    app, _ = make_app(tmp_path)
+    synthesizer = FakeSpeechSynthesizer()
+    app, _ = make_app(
+        tmp_path,
+        speech_synthesizer=synthesizer,
+    )
     client = app.test_client()
     signup(client)
     login(client)
-    response = client.post("/api/business/config", json={"assistant_name": "Friday", "assistant_voice": "female"}, headers={"X-CSRF-Token": client.get_cookie("assistant_csrf").value})
+
+    csrf_token = client.get_cookie("assistant_csrf").value
+    response = client.post(
+        "/api/business/config",
+        json={
+            "assistant_name": "Friday",
+            "assistant_voice": "female",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
     assert response.status_code == 200
     assert response.get_json()["assistant_name"] == "Friday"
+    assert response.get_json()["assistant_voice"] == "female"
 
+    saved_business = client.get("/api/me").get_json()["business"]
+    assert saved_business["assistant_voice"] == "female"
+
+    speech_response = client.post(
+        "/api/assistant/message",
+        json={"message": "Test the selected voice"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert speech_response.status_code == 200
+    assert speech_response.get_json()["speech_available"] is True
+    assert len(synthesizer.calls) == 1
+    assert synthesizer.calls[0].voice == "female"
 
 def test_expired_trial_blocks_execution_and_marks_state_expired(tmp_path):
     app, db = make_app(tmp_path)
@@ -327,3 +361,127 @@ def test_provider_failure_does_not_persist_incomplete_exchange(tmp_path):
         business_id=row["business_id"],
     )
     assert history.turns == ()
+
+class FakeSpeechSynthesizer:
+    def __init__(self, audio=b"test-mp3-audio"):
+        self.audio = audio
+        self.calls = []
+
+    def synthesize(self, speech_request):
+        self.calls.append(speech_request)
+        return self.audio
+
+
+class FailingSpeechSynthesizer:
+    def synthesize(self, speech_request):
+        raise RuntimeError("PRIVATE_PROVIDER_DETAIL")
+
+
+def test_web_route_returns_injected_speech_audio_as_base64(tmp_path):
+    audio_bytes = b"test-mp3-audio"
+    synthesizer = FakeSpeechSynthesizer(audio=audio_bytes)
+
+    app, _ = make_app(
+        tmp_path,
+        speech_synthesizer=synthesizer,
+    )
+    client = app.test_client()
+    signup(client)
+    login(client)
+
+    response = client.post(
+        "/api/assistant/message",
+        json={"message": "speak this"},
+        headers={
+            "X-CSRF-Token": client.get_cookie("assistant_csrf").value
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+
+    assert payload["message"] == "Received: speak this"
+    assert payload["should_speak"] is True
+    assert payload["speech_available"] is True
+    assert payload["speech_mime_type"] == "audio/mpeg"
+    assert base64.b64decode(
+        payload["speech_audio_base64"],
+        validate=True,
+    ) == audio_bytes
+
+    assert len(synthesizer.calls) == 1
+    request = synthesizer.calls[0]
+    assert request.text == "Received: speak this"
+    assert request.voice == "male"
+    assert request.speed == 1.0
+
+
+def test_web_route_keeps_text_when_speech_provider_fails(tmp_path):
+    app, _ = make_app(
+        tmp_path,
+        speech_synthesizer=FailingSpeechSynthesizer(),
+    )
+    client = app.test_client()
+    signup(client)
+    login(client)
+
+    response = client.post(
+        "/api/assistant/message",
+        json={"message": "hello"},
+        headers={
+            "X-CSRF-Token": client.get_cookie("assistant_csrf").value
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+
+    assert payload["message"] == "Received: hello"
+    assert payload["should_speak"] is True
+    assert payload["speech_available"] is False
+    assert payload["speech_error"] == (
+        "Voice playback is unavailable right now. "
+        "Your text response is ready."
+    )
+    assert "PRIVATE_PROVIDER_DETAIL" not in response.get_data(as_text=True)
+    assert "speech_audio_base64" not in payload
+
+def test_public_root_displays_amination_landing_page(tmp_path):
+    app, _ = make_app(tmp_path)
+    client = app.test_client()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Amination AI" in page
+    assert 'lang="en-ZA"' in page
+    assert "From Imagination" in page
+    assert "to Reality." in page
+    assert 'name="viewport"' in page
+    assert 'property="og:title"' in page
+    assert 'property="og:description"' in page
+    assert 'name="twitter:card"' in page
+    assert 'href="/login"' in page
+    assert 'href="/signup"' in page
+    assert 'href="#main-content"' in page
+    assert 'id="main-content"' in page
+    assert 'tabindex="-1"' in page
+    assert "Skip to main content" in page
+    assert '<nav class="top-nav" aria-label="Main navigation">' in page
+    assert page.count("<h1>") == 1
+    assert page.count('<article class="principle">') == 3
+    assert '<footer class="footer">' in page
+
+
+def test_authenticated_root_redirects_to_dashboard(tmp_path):
+    app, _ = make_app(tmp_path)
+    client = app.test_client()
+
+    signup(client)
+    login(client)
+
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/dashboard")
