@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 21
 
 
 class SQLiteDatabase:
@@ -1400,6 +1400,172 @@ def _migrate_v16_to_v17(connection: sqlite3.Connection) -> None:
             "Forge project migration produced foreign-key violations."
         )
 
+def _migrate_v17_to_v18(connection: sqlite3.Connection) -> None:
+    """Create durable, tenant-scoped Forge job storage."""
+    connection.execute(
+        """
+        CREATE TABLE forge_jobs (
+            business_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            job_id TEXT NOT NULL
+                CHECK(length(trim(job_id)) > 0 AND length(job_id) <= 128),
+            job_type TEXT NOT NULL
+                CHECK(length(trim(job_type)) > 0 AND length(job_type) <= 256),
+            status TEXT NOT NULL
+                CHECK(status IN (
+                    'queued', 'running', 'completed_vaulted',
+                    'completed_vaulted_locked', 'failed', 'cancelled'
+                )),
+            phase TEXT NOT NULL
+                CHECK(length(trim(phase)) > 0 AND length(phase) <= 256),
+            progress INTEGER NOT NULL CHECK(progress BETWEEN 0 AND 100),
+            created_at TEXT NOT NULL CHECK(length(trim(created_at)) > 0),
+            updated_at TEXT NOT NULL CHECK(length(trim(updated_at)) > 0),
+            heartbeat_at TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            cancellation_requested INTEGER NOT NULL DEFAULT 0
+                CHECK(cancellation_requested IN (0, 1)),
+            checkpoint_json TEXT
+                CHECK(
+                    checkpoint_json IS NULL OR
+                    length(CAST(checkpoint_json AS BLOB)) <= 16384
+                ),
+            error_code TEXT
+                CHECK(error_code IS NULL OR
+                    (length(trim(error_code)) BETWEEN 1 AND 256)),
+            error_message TEXT
+                CHECK(error_message IS NULL OR
+                    (length(trim(error_message)) BETWEEN 1 AND 256)),
+            revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+
+            PRIMARY KEY(business_id, project_id, job_id),
+
+            FOREIGN KEY(business_id)
+                REFERENCES businesses(business_id) ON DELETE RESTRICT,
+            FOREIGN KEY(business_id, project_id)
+                REFERENCES forge_projects(business_id, project_id)
+                ON DELETE RESTRICT,
+
+            CHECK(updated_at >= created_at),
+            CHECK(started_at IS NULL OR
+                (started_at >= created_at AND started_at <= updated_at)),
+            CHECK(heartbeat_at IS NULL OR
+                (started_at IS NOT NULL AND
+                 heartbeat_at >= started_at AND heartbeat_at <= updated_at)),
+            CHECK(completed_at IS NULL OR
+                (completed_at >= created_at AND completed_at <= updated_at)),
+            CHECK(completed_at IS NULL OR started_at IS NULL OR
+                completed_at >= started_at),
+            CHECK(completed_at IS NULL OR heartbeat_at IS NULL OR
+                completed_at >= heartbeat_at),
+
+            CHECK(
+                (status = 'queued' AND started_at IS NULL AND completed_at IS NULL)
+                OR
+                (status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL)
+                OR
+                (status IN (
+                    'completed_vaulted', 'completed_vaulted_locked'
+                ) AND started_at IS NOT NULL AND completed_at IS NOT NULL
+                  AND progress = 100)
+                OR
+                (status IN ('failed', 'cancelled') AND completed_at IS NOT NULL)
+            ),
+
+            CHECK(
+                (status = 'failed' AND error_code IS NOT NULL)
+                OR
+                (status != 'failed' AND error_code IS NULL
+                 AND error_message IS NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_forge_jobs_project_created
+        ON forge_jobs(business_id, project_id, created_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_forge_jobs_queue
+        ON forge_jobs(status, created_at)
+        """
+    )
+
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise RuntimeError(
+            "Forge job migration produced foreign-key violations."
+        )
+
+
+def _migrate_v18_to_v19(connection: sqlite3.Connection) -> None:
+    """Add worker leases and fencing generations to Forge jobs."""
+    connection.execute("ALTER TABLE forge_jobs ADD COLUMN worker_id TEXT")
+    connection.execute("ALTER TABLE forge_jobs ADD COLUMN lease_expires_at TEXT")
+    connection.execute("""
+        ALTER TABLE forge_jobs
+        ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0
+        CHECK(lease_generation >= 0)
+    """)
+    connection.execute("""
+        CREATE INDEX idx_forge_jobs_running_lease
+        ON forge_jobs(status, lease_expires_at)
+        WHERE status = 'running'
+    """)
+
+
+def _migrate_v19_to_v20(connection: sqlite3.Connection) -> None:
+    """Store immutable, tenant-scoped approved Forge task specifications."""
+    connection.execute("""
+        CREATE TABLE forge_task_specs (
+            business_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            spec_json TEXT NOT NULL
+                CHECK(length(CAST(spec_json AS BLOB)) <= 32768),
+            spec_sha256 TEXT NOT NULL
+                CHECK(length(spec_sha256) = 64
+                      AND spec_sha256 = lower(spec_sha256)),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (business_id, project_id, job_id),
+            FOREIGN KEY (business_id, project_id, job_id)
+                REFERENCES forge_jobs (business_id, project_id, job_id)
+                ON DELETE RESTRICT
+        )
+    """)
+
+
+
+def _migrate_v20_to_v21(connection: sqlite3.Connection) -> None:
+    """Register immutable GitHub repository identities for Forge projects."""
+    connection.execute(
+        """
+        CREATE TABLE forge_project_repositories (
+            business_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            provider TEXT NOT NULL CHECK(provider = 'github'),
+            repository_owner TEXT NOT NULL
+                CHECK(length(trim(repository_owner)) BETWEEN 1 AND 39),
+            repository_name TEXT NOT NULL
+                CHECK(length(trim(repository_name)) BETWEEN 1 AND 100),
+            default_branch TEXT NOT NULL
+                CHECK(length(trim(default_branch)) BETWEEN 1 AND 255),
+            created_at TEXT NOT NULL CHECK(length(trim(created_at)) > 0),
+            updated_at TEXT NOT NULL CHECK(length(trim(updated_at)) > 0),
+            PRIMARY KEY(business_id, project_id),
+            FOREIGN KEY(business_id, project_id)
+                REFERENCES forge_projects(business_id, project_id)
+                ON DELETE RESTRICT,
+            CHECK(updated_at >= created_at)
+        )
+        """
+    )
+
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
@@ -1417,6 +1583,10 @@ MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     14: _migrate_v14_to_v15,
     15: _migrate_v15_to_v16,
     16: _migrate_v16_to_v17,
+    17: _migrate_v17_to_v18,
+    18: _migrate_v18_to_v19,
+    19: _migrate_v19_to_v20,
+    20: _migrate_v20_to_v21,
 }
 
 # Backwards-compatible name for callers that imported SCHEMA.

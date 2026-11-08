@@ -1,0 +1,38 @@
+[Unit]
+Description=Amination Forge isolated execution runner
+Documentation=file:/opt/amination-ai/deploy/forge-runner/README.md
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=forge-runner
+Group=forge-runner
+SupplementaryGroups=docker
+WorkingDirectory=/opt/amination-ai
+EnvironmentFile=/etc/amination-forge/runner.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=HOME=/var/lib/amination-forge/home
+ExecStart=/opt/amination-ai/.venv/bin/python -m app.forge.runner.server
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/amination-forge
+
+[Install]
+WantedBy=multi-user.target

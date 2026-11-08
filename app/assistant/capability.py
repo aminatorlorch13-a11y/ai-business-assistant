@@ -21,6 +21,7 @@ class Capability(str, Enum):
     COMMUNICATION = "communication"
     BUSINESS_DATA = "business_data"
     VOICE = "voice"
+    FORGE = "forge"
 
 
 @dataclass(frozen=True)

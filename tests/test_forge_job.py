@@ -286,3 +286,26 @@ def test_completed_at_cannot_precede_started_at():
             error_code="TEST_FAILURE",
             completed_at=NOW + timedelta(seconds=1),
         )
+
+
+def test_completed_job_requires_started_at():
+    with pytest.raises(ValueError, match="started_at"):
+        make_job(
+            status=ForgeJobStatus.COMPLETED_VAULTED,
+            progress=100,
+            completed_at=NOW + timedelta(seconds=2),
+            updated_at=NOW + timedelta(seconds=2),
+        )
+
+
+def test_completed_at_cannot_precede_heartbeat_at():
+    with pytest.raises(ValueError, match="heartbeat_at"):
+        make_job(
+            status=ForgeJobStatus.FAILED,
+            phase="failed",
+            started_at=NOW + timedelta(seconds=1),
+            heartbeat_at=NOW + timedelta(seconds=3),
+            completed_at=NOW + timedelta(seconds=2),
+            updated_at=NOW + timedelta(seconds=3),
+            error_code="TEST_FAILURE",
+        )

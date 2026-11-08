@@ -1,4 +1,6 @@
 from __future__ import annotations
+import atexit
+import threading
 
 import base64
 import os
@@ -168,6 +170,147 @@ def create_app(
         if request.path.startswith("/api/"):
             return jsonify({"error": str(exc)}), 400
         return "Bad request", 400
+
+    def _forge_terminal_composition():
+        composition = app.extensions.get("assistant_capability_composition")
+        if composition is None:
+            composition = build_production_capability_composition(
+                database=app.extensions["assistant_database"],
+            )
+            app.extensions["assistant_capability_composition"] = composition
+        return composition
+
+    def _forge_terminal_service():
+        service = app.extensions.get("assistant_forge_terminal_service")
+        if service is not None:
+            return service
+
+        # Runner configuration is needed only when a terminal is opened.
+        composition = _forge_terminal_composition()
+        service = composition.create_forge_terminal_service()
+        app.extensions["assistant_forge_terminal_service"] = service
+        return service
+
+    def _forge_terminal_identity():
+        business_id = getattr(g.principal, "business_id", None)
+        if not business_id:
+            raise PermissionError("An active business is required.")
+
+        business = businesses.get(business_id)
+        if business is None:
+            raise PermissionError("The active business is unavailable.")
+
+        access.require_execution(business_id)
+        return business_id
+
+    @app.get("/api/forge/terminal/projects")
+    @login_required
+    def forge_terminal_projects():
+        business_id = _forge_terminal_identity()
+
+        # Project discovery must not depend on remote runner configuration.
+        composition = _forge_terminal_composition()
+        if composition is None or composition.forge_job_store is None:
+            return jsonify({"error": "Forge job storage is unavailable."}), 503
+
+        database = app.extensions["assistant_database"]
+        with database.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT project_id, name
+                FROM forge_projects
+                WHERE business_id = ? AND status = 'ACTIVE'
+                ORDER BY name ASC, project_id ASC
+                LIMIT 100
+                """,
+                (business_id,),
+            ).fetchall()
+
+        projects = []
+        for row in rows:
+            project_id = row["project_id"]
+            records = composition.forge_job_store.list_for_project(
+                business_id, project_id
+            )
+            jobs = []
+
+            for record in records:
+                job = record.job
+                status = getattr(job.status, "value", job.status)
+
+                # Locked candidates and all non-vaulted jobs stay unavailable.
+                if status != "completed_vaulted":
+                    continue
+
+                job_type = getattr(job.job_type, "value", job.job_type)
+                phase = getattr(job.phase, "value", job.phase)
+                created_at = job.created_at
+                if hasattr(created_at, "isoformat"):
+                    created_at = created_at.isoformat()
+
+                jobs.append({
+                    "job_id": job.job_id,
+                    "job_type": str(job_type),
+                    "phase": str(phase),
+                    "created_at": str(created_at),
+                })
+
+                if len(jobs) >= 50:
+                    break
+
+            projects.append({
+                "project_id": project_id,
+                "name": row["name"],
+                "jobs": jobs,
+            })
+
+        return jsonify({"ok": True, "projects": projects}), 200
+
+    @app.post("/api/forge/projects/<project_id>/jobs/<job_id>/terminal")
+    @login_required
+    def forge_terminal_open(project_id: str, job_id: str):
+        require_csrf(request)
+        business_id = _forge_terminal_identity()
+        service = _forge_terminal_service()
+        result = service.open_session(business_id, project_id, job_id)
+        return jsonify({"ok": True, "terminal": result}), 200
+
+    @app.post("/api/forge/projects/<project_id>/jobs/<job_id>/terminal/command")
+    @login_required
+    def forge_terminal_command(project_id: str, job_id: str):
+        require_csrf(request)
+        business_id = _forge_terminal_identity()
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            raise ValueError("A JSON request body is required.")
+
+        command = payload.get("command")
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError("A non-empty terminal command is required.")
+        if len(command) > 4096:
+            raise ValueError("Terminal commands cannot exceed 4096 characters.")
+
+        service = _forge_terminal_service()
+        result = service.execute(business_id, project_id, job_id, command)
+        return jsonify(result), 200
+
+    @app.post("/api/forge/projects/<project_id>/jobs/<job_id>/terminal/save")
+    @login_required
+    def forge_terminal_save(project_id: str, job_id: str):
+        require_csrf(request)
+        business_id = _forge_terminal_identity()
+        service = _forge_terminal_service()
+        result = service.save_session(business_id, project_id, job_id)
+        return jsonify({"ok": True, "result": result}), 200
+
+    @app.delete("/api/forge/projects/<project_id>/jobs/<job_id>/terminal")
+    @login_required
+    def forge_terminal_close(project_id: str, job_id: str):
+        require_csrf(request)
+        business_id = _forge_terminal_identity()
+        service = _forge_terminal_service()
+        closed = service.close_session(business_id, project_id, job_id)
+        return jsonify({"ok": True, "closed": closed}), 200
 
     @app.get("/")
     def index():
@@ -780,6 +923,34 @@ def create_app(
     return app
 
 
+_forge_runner_lock = threading.Lock()
+_forge_runner = None
+
+
+def _ensure_process_forge_worker(
+    capability_composition,
+    processor: StructuredAssistantProcessor,
+) -> None:
+    """Start at most one production Forge worker in this process."""
+    global _forge_runner
+
+    enabled = os.getenv("AMINATION_FORGE_WORKER_ENABLED", "true")
+    if enabled.strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+
+    with _forge_runner_lock:
+        if _forge_runner is not None and _forge_runner.is_running:
+            return
+
+        _forge_runner = capability_composition.start_brain_forge_worker(
+            processor,
+            worker_id=f"web-forge-{os.getpid()}",
+            lease_seconds=300,
+            poll_interval=1.0,
+        )
+        atexit.register(_forge_runner.stop)
+
+
 def _production_runtime_builder(business: Business) -> OrchestratorLike:
     """Build the structured production assistant runtime for one business.
 
@@ -817,6 +988,11 @@ def _production_runtime_builder(business: Business) -> OrchestratorLike:
     processor = StructuredAssistantProcessor(
         ai_provider=structured_provider,
         memory_context_builder=memory_context_builder,
+    )
+
+    _ensure_process_forge_worker(
+        capability_composition,
+        processor,
     )
 
     confirmation_repository = SQLiteCapabilityConfirmationRepository(

@@ -20,6 +20,11 @@
         </div>
         <div class="ls-header-actions">
             <span class="ls-business">{{ business.name }}</span>
+            <button id="forge-terminal-toggle" class="secondary"
+                    type="button" aria-controls="forge-terminal-panel"
+                    aria-expanded="false">
+                Forge terminal
+            </button>
             <button id="logout" class="secondary" type="button">Sign out</button>
         </div>
     </header>
@@ -102,12 +107,71 @@
         </aside>
     </section>
 
+
+    <section id="forge-terminal-panel" class="forge-terminal"
+             aria-hidden="true" aria-label="Forge virtual terminal">
+        <header class="forge-terminal-header">
+            <div>
+                <span class="forge-terminal-kicker">AMINATION FORGE</span>
+                <h2>Workspace terminal</h2>
+                <p id="forge-terminal-status" role="status">
+                    Enter a project and completed job ID to begin.
+                </p>
+            </div>
+            <div class="forge-terminal-actions">
+                <button id="forge-terminal-hide" class="secondary"
+                        type="button">Hide</button>
+                <button id="forge-terminal-close" class="secondary"
+                        type="button">Close session</button>
+            </div>
+        </header>
+
+        <form id="forge-terminal-open-form" class="forge-terminal-open">
+            <label>
+                Forge project ID
+                <select id="forge-terminal-project" name="project_id" required></select>
+            </label>
+            <label>
+                Completed Forge job ID
+                <select id="forge-terminal-job" name="job_id" required></select>
+            </label>
+            <button id="forge-terminal-open" type="submit">
+                Open workspace
+            </button>
+        </form>
+
+        <pre id="forge-terminal-output" class="forge-terminal-output"
+             role="log" aria-live="polite">Forge terminal is ready.</pre>
+
+        <form id="forge-terminal-command-form" class="forge-terminal-command">
+            <label class="forge-terminal-command-label" for="forge-terminal-command">
+                Command
+            </label>
+            <input id="forge-terminal-command" name="command"
+                   autocomplete="off" spellcheck="false"
+                   placeholder="help, ls, cat, check, build, test, run ..."
+                   disabled required>
+            <button id="forge-terminal-send" type="submit" disabled>
+                Run
+            </button>
+        </form>
+
+        <div class="forge-terminal-footer">
+            <span>Commands run through the authorised Forge workspace.</span>
+            <button id="forge-terminal-save" class="secondary"
+                    type="button" disabled>Save workspace</button>
+        </div>
+        <p id="forge-terminal-error" class="forge-terminal-error"
+           role="alert"></p>
+    </section>
+
     <footer class="ls-footer">AMINATION AI · BUILT TO HELP BUSINESSES MOVE FORWARD</footer>
 </main>
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 <script>
     wireDashboard();
+        wireForgeTerminal();
 </script>
 <script type="module" src="{{ url_for('static', filename='living-spectrum.js') }}"></script>
 </body>

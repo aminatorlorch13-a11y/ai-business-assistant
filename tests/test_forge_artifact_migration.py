@@ -15,8 +15,8 @@ def test_fresh_database_creates_forge_artifact_table(tmp_path):
     database = SQLiteDatabase(tmp_path / "fresh.sqlite3")
     database.initialize()
 
-    assert SCHEMA_VERSION == 17
-    assert schema_version(database) == 17
+    assert SCHEMA_VERSION == 21
+    assert schema_version(database) == 21
 
     with database.connection() as connection:
         columns = {
@@ -48,6 +48,9 @@ def test_v14_database_migrates_without_losing_business_data(tmp_path):
     database.initialize()
 
     with database.transaction() as connection:
+        connection.execute("DROP TABLE forge_task_specs")
+        connection.execute("DROP TABLE forge_project_repositories")
+        connection.execute("DROP TABLE forge_jobs")
         connection.execute(
             """
             INSERT INTO businesses(
@@ -69,7 +72,7 @@ def test_v14_database_migrates_without_losing_business_data(tmp_path):
 
     database.initialize()
 
-    assert schema_version(database) == 17
+    assert schema_version(database) == 21
 
     with database.connection() as connection:
         business = connection.execute(
@@ -146,6 +149,9 @@ def test_v15_artifacts_restrict_business_deletion(tmp_path):
     database.initialize()
 
     with database.transaction() as connection:
+        connection.execute("DROP TABLE forge_task_specs")
+        connection.execute("DROP TABLE forge_project_repositories")
+        connection.execute("DROP TABLE forge_jobs")
         connection.execute(
             """
             INSERT INTO businesses(
@@ -190,7 +196,7 @@ def test_v15_artifacts_restrict_business_deletion(tmp_path):
 
     database.initialize()
 
-    assert schema_version(database) == 17
+    assert schema_version(database) == 21
 
     with database.connection() as connection:
         artifact = connection.execute(
@@ -222,6 +228,9 @@ def test_v16_migration_backfills_tenant_scoped_projects_and_preserves_artifacts(
     database.initialize()
 
     with database.transaction() as connection:
+        connection.execute("DROP TABLE forge_task_specs")
+        connection.execute("DROP TABLE forge_project_repositories")
+        connection.execute("DROP TABLE forge_jobs")
         for business_id in ("tenant-a", "tenant-b"):
             connection.execute(
                 """
@@ -275,7 +284,7 @@ def test_v16_migration_backfills_tenant_scoped_projects_and_preserves_artifacts(
 
     assert schema_version(database) == 16
     database.initialize()
-    assert schema_version(database) == 17
+    assert schema_version(database) == 21
 
     with database.connection() as connection:
         projects = connection.execute(
@@ -307,3 +316,47 @@ def test_v16_migration_backfills_tenant_scoped_projects_and_preserves_artifacts(
                 ("cross-tenant", "tenant-a", "tenant-b-only", "5" * 64,
                  5, "text/plain", "5" * 64, "2026-11-05T08:00:00+00:00"),
             )
+
+
+def test_v17_database_migrates_to_v18_with_tenant_scoped_forge_jobs(tmp_path):
+    database = SQLiteDatabase(tmp_path / "v17-upgrade.sqlite3")
+    database.initialize()
+
+    with database.transaction() as connection:
+        connection.execute("DROP TABLE forge_task_specs")
+        connection.execute("DROP TABLE forge_project_repositories")
+        connection.execute("DROP TABLE forge_jobs")
+        connection.execute(
+            "UPDATE persistence_metadata SET value = '17' "
+            "WHERE key = 'schema_version'"
+        )
+
+    database.initialize()
+
+    assert schema_version(database) == 21
+
+    with database.connection() as connection:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(forge_jobs)")
+        }
+        foreign_keys = connection.execute(
+            "PRAGMA foreign_key_list(forge_jobs)"
+        ).fetchall()
+        indexes = {
+            row["name"]
+            for row in connection.execute("PRAGMA index_list(forge_jobs)")
+        }
+
+    assert {
+        "business_id", "project_id", "job_id", "job_type",
+        "status", "phase", "progress", "created_at", "updated_at",
+        "heartbeat_at", "started_at", "completed_at",
+        "cancellation_requested", "checkpoint_json",
+        "error_code", "error_message", "revision",
+    } <= columns
+
+    assert any(row["table"] == "businesses" for row in foreign_keys)
+    assert any(row["table"] == "forge_projects" for row in foreign_keys)
+    assert "idx_forge_jobs_project_created" in indexes
+    assert "idx_forge_jobs_queue" in indexes

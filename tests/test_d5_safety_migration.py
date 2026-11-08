@@ -57,7 +57,7 @@ def test_fresh_database_initializes_at_current_schema(tmp_path):
     db = SQLiteDatabase(tmp_path / "fresh.db")
     db.initialize()
 
-    assert SCHEMA_VERSION == 17
+    assert SCHEMA_VERSION == 21
     assert _schema_version(db) == SCHEMA_VERSION
 
     assert _table_names(db) == {
@@ -82,6 +82,9 @@ def test_v7_database_migrates_to_current_schema_without_losing_existing_data(tmp
             "web_conversation_turns",
             "voice_conversation_turns",
             "voice_conversations",
+            "forge_project_repositories",
+            "forge_task_specs",
+            "forge_jobs",
             "forge_artifacts",
             "forge_projects",
         ):
@@ -222,6 +225,9 @@ def test_v8_to_v9_preserves_safety_incident_and_control_data(tmp_path):
             "web_conversation_turns",
             "voice_conversation_turns",
             "voice_conversations",
+            "forge_project_repositories",
+            "forge_task_specs",
+            "forge_jobs",
             "forge_artifacts",
             "forge_projects",
         ):
@@ -532,6 +538,9 @@ def test_v13_to_v14_creates_voice_history(tmp_path):
         )
         connection.execute("DROP TABLE IF EXISTS voice_conversation_turns")
         connection.execute("DROP TABLE IF EXISTS voice_conversations")
+        connection.execute("DROP TABLE IF EXISTS forge_project_repositories")
+        connection.execute("DROP TABLE IF EXISTS forge_task_specs")
+        connection.execute("DROP TABLE IF EXISTS forge_jobs")
         connection.execute("DROP TABLE IF EXISTS forge_artifacts")
         connection.execute("DROP TABLE IF EXISTS forge_projects")
 

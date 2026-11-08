@@ -150,6 +150,11 @@ class ForgeJob:
 
         if self.status == ForgeJobStatus.RUNNING and self.started_at is None:
             raise ValueError("Running jobs must have started_at.")
+        if self.status in {
+            ForgeJobStatus.COMPLETED_VAULTED,
+            ForgeJobStatus.COMPLETED_VAULTED_LOCKED,
+        } and self.started_at is None:
+            raise ValueError("Completed jobs must have started_at.")
 
         if self.status in {
             ForgeJobStatus.COMPLETED_VAULTED,

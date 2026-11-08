@@ -1,0 +1,5 @@
+# Replace this hostname with a domain whose DNS points to the runner VM.
+runner.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8765
+}
