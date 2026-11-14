@@ -12,3 +12,9 @@ __pycache__/
 .env
 
 backups/
+
+# SQLite database sidecars (never publish live database state)
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-wal
+*.db-shm

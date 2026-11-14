@@ -21,6 +21,7 @@ class CapabilityExecutionPreparer:
         business_id: str,
         channel: str | None = None,
         integration: str | None = None,
+        actor_user_id: str | None = None,
     ) -> CapabilityExecutionRequest:
         if not isinstance(request, AICapabilityRequest):
             raise TypeError(
@@ -56,6 +57,11 @@ class CapabilityExecutionPreparer:
             integration=(
                 integration.strip()
                 if integration is not None
+                else None
+            ),
+            actor_user_id=(
+                actor_user_id.strip()
+                if actor_user_id is not None
                 else None
             ),
         )

@@ -189,3 +189,41 @@ def test_parser_rejects_non_boolean_reversible() -> None:
 
     with pytest.raises(ValueError, match="reversible"):
         AICapabilityResponseParser().parse(response)
+
+def test_parser_accepts_gmail_search_proposal() -> None:
+    result = AICapabilityResponseParser().parse({
+        "response": None,
+        "capability_requests": [{
+            "capability": "communication",
+            "operation": "gmail_search",
+            "arguments": {
+                "query": "from:billing newer_than:30d",
+                "max_results": 10,
+            },
+            "reason": "Find the user's recent billing email.",
+            "reversible": True,
+        }],
+    })
+
+    request = result.capability_requests[0]
+    assert request.capability is Capability.COMMUNICATION
+    assert request.operation == "gmail_search"
+    assert request.arguments["max_results"] == 10
+
+
+def test_parser_accepts_gmail_read_proposal() -> None:
+    result = AICapabilityResponseParser().parse({
+        "response": None,
+        "capability_requests": [{
+            "capability": "communication",
+            "operation": "gmail_read",
+            "arguments": {"message_id": "returned-message-id"},
+            "reason": "Read the exact message returned by Gmail search.",
+            "reversible": True,
+        }],
+    })
+
+    request = result.capability_requests[0]
+    assert request.capability is Capability.COMMUNICATION
+    assert request.operation == "gmail_read"
+    assert request.arguments["message_id"] == "returned-message-id"

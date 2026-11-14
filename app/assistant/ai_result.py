@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.assistant.ai_capability_request import AICapabilityRequest
+from app.assistant.speech_direction import SpeechDirection
 
 
 @dataclass(frozen=True)
@@ -23,8 +24,13 @@ class AIResult:
 
     response: str | None = None
     capability_requests: tuple[AICapabilityRequest, ...] = ()
+    speech_direction: SpeechDirection | None = None
 
     def __post_init__(self) -> None:
+        if self.speech_direction is not None and not isinstance(
+            self.speech_direction, SpeechDirection
+        ):
+            raise TypeError('speech_direction must be SpeechDirection or None.')
         if self.response is not None:
             if not isinstance(self.response, str):
                 raise TypeError("response must be a string or None.")

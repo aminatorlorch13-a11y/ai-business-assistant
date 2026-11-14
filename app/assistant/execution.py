@@ -18,6 +18,7 @@ class CapabilityExecutionRequest:
     reason: str
     channel: str | None = None
     integration: str | None = None
+    actor_user_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.capability, Capability):
@@ -44,6 +45,7 @@ class CapabilityExecutionRequest:
         for name, value in (
             ("channel", self.channel),
             ("integration", self.integration),
+            ("actor_user_id", self.actor_user_id),
         ):
             if value is not None:
                 if not isinstance(value, str):
@@ -82,6 +84,12 @@ class CapabilityExecutionRequest:
                 self,
                 "integration",
                 self.integration.strip(),
+            )
+        if self.actor_user_id is not None:
+            object.__setattr__(
+                self,
+                "actor_user_id",
+                self.actor_user_id.strip(),
             )
 
 

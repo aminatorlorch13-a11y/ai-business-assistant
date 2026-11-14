@@ -1,0 +1,1191 @@
+AMINATION AI — PROJECT-WIDE FAKE / INCOMPLETE WORK AUDIT
+Files scanned: 797
+Findings: 516
+
+CATEGORY COUNTS:
+FAKE / SIMULATION: 63
+MOCK / STUB: 297
+PLACEHOLDER / DEMO: 7
+INCOMPLETE WORK: 25
+POSSIBLE HARDCODED SUCCESS: 70
+POSSIBLE FAKE PROVIDER: 54
+
+GIT WORKING TREE:
+ M app/ai/groq_provider.py
+ M app/ai/openai_provider.py
+ M app/assistant/capability_composition.py
+ M app/assistant/capability_preparation.py
+ M app/assistant/capability_registry.py
+ M app/assistant/execution.py
+ M app/assistant/orchestrator.py
+ M app/forge/terminal_service.py
+ M app/forge/worker.py
+ M app/persistence/capability_confirmation.py
+ M app/persistence/database.py
+ M app/trust/capability_executor.py
+ M app/web/application.py
+ M tests/test_ai_capability_response_parser.py
+ M tests/test_ai_provider_boundary_attack.py
+ M tests/test_assistant_orchestrator.py
+ M tests/test_capability_confirmation.py
+ M tests/test_capability_confirmation_service.py
+ M tests/test_d5_safety_migration.py
+ M tests/test_forge_artifact_migration.py
+ M tests/test_forge_project_repository_store.py
+ M tests/test_forge_terminal_service.py
+ M tests/test_web_conversation.py
+?? .amination_e18_p1.py
+?? .apply_forge_acceptance_v23.py
+?? .apply_forge_v17.py
+?? .apply_v14_migration_patch.py
+?? .forge_selector_patch.py
+?? .forge_terminal_bridge_patch.py
+?? .forge_terminal_ui_patch.py
+?? .forge_website_api_patch.py
+?? .patch_forge_runner_hardening.py
+?? .safety-schema-assertions-20261014-213112/
+?? .strengthen_forge_artifact_projects.py
+?? .strengthen_forge_terminal_security.py
+?? .update_confirmation_tests.py
+?? .update_forge_v17_tests.py
+?? add_gmail_capabilities.py
+?? add_gmail_orchestrator_tests.py
+?? add_gmail_regression_tests.py
+?? app/ai/groq_provider.py.pre_gmail_prompt.bak
+?? app/ai/groq_provider.py.pre_gmail_tests.bak
+?? app/ai/openai_provider.py.pre_gmail_prompt.bak
+?? app/assistant/capability_composition.py.backup-20261108T213413Z
+?? app/assistant/capability_composition.py.backup-20261109T104854Z
+?? app/assistant/capability_composition.py.pre_gmail_capabilities.bak
+?? app/assistant/capability_preparation.py.pre_gmail_identity.bak
+?? app/assistant/capability_registry.py.pre_gmail_capabilities.bak
+?? app/assistant/execution.py.pre_gmail_identity.bak
+?? app/assistant/gmail_capability_handlers.py
+?? app/assistant/orchestrator.py.pre_gmail_orchestrator.bak
+?? app/forge/acceptance_service.py
+?? app/forge/acceptance_service.py.pre-evidence.bak
+?? app/forge/acceptance_store.py
+?? app/forge/sentinel_coordinator.py
+?? app/forge/sentinel_coordinator.py.backup-20261108T212931Z
+?? app/forge/sentinel_coordinator.py.backup-20261108T213413Z
+?? app/forge/sentinel_coordinator.py.backup-20261108T215637Z
+?? app/forge/sentinel_guards.py
+?? app/forge/sentinel_guards.py.backup-20261108T180113Z
+?? app/forge/sentinel_guards.py.backup-before-coordinator-20261108T204725Z
+?? app/forge/sentinel_reviewers.py
+?? app/forge/sentinel_store.py
+?? app/forge/sentinel_store.py.backup-20261108T180113Z
+?? app/forge/sentinel_store.py.backup-20261108T215637Z
+?? app/forge/terminal_service.py.backup-20261108T213413Z
+?? app/forge/terminal_service.py.bak-20261108T220454Z
+?? app/forge/worker.py.backup-20261108T212931Z
+?? app/integrations/
+?? app/owner/
+?? app/persistence/capability_confirmation.py.pre_gmail_identity.bak
+?? app/persistence/communication_repository.py
+?? app/persistence/database.py.backup-20261108T175800Z
+?? app/persistence/database.py.backup-20261108T180113Z
+?? app/persistence/database.py.pre_fk_fix.bak
+?? app/persistence/database.py.pre_integrations.bak
+?? app/persistence/database.py.pre_oauth_foundation.bak
+?? app/persistence/database.py.pre_owner_lifestyle_v27.bak
+?? app/persistence/integration_repository.py
+?? app/persistence/integration_repository.py.pre_atomic.bak
+?? app/persistence/integration_repository.py.pre_gmail_lookup.bak
+?? app/persistence/integration_repository.py.pre_google_refresh.bak
+?? app/persistence/integration_repository.py.pre_granular_permissions.bak
+?? app/persistence/integration_repository.py.pre_oauth_foundation.bak
+?? app/persistence/integration_repository.py.pre_rotation_audit.bak
+?? app/trust/capability_executor.py.pre_gmail_identity.bak
+?? app/web/application.py.pre_gmail_injection.bak
+?? app/web/application.py.pre_google_oauth.bak
+?? app/web/application.py.pre_owner_lifestyle_integration.bak
+?? app/web/google_oauth.py
+?? app/web/google_oauth.py.pre_gmail_api.bak
+?? app/web/google_oauth.py.pre_google_protocol.bak
+?? enable_gmail_ai_proposals.py
+?? patch_atomic_integrations.py
+?? patch_granular_permissions.py
+?? patch_integration_integrity_tests.py
+?? patch_key_rotation.py
+?? patch_oauth_foundation.py
+?? patch_rotation_audit.py
+?? patch_secret_key_version.py
+?? patch_tamper_test.py
+?? patch_tenant_isolation.py
+?? tests/test_ai_capability_response_parser.py.pre_gmail_tests.bak
+?? tests/test_ai_provider_boundary_attack.py.pre_gmail_tests.bak
+?? tests/test_assistant_orchestrator.py.pre_gmail_orchestrator.bak
+?? tests/test_capability_confirmation.py.bak
+?? tests/test_capability_confirmation.py.bak-20261109-115204
+?? tests/test_communication_repository.py
+?? tests/test_d5_safety_migration.py.bak
+?? tests/test_d5_safety_migration.py.bak-20261109-115204
+?? tests/test_forge_acceptance_database.py
+?? tests/test_forge_acceptance_database.py.bak-before-started-at-fix
+?? tests/test_forge_acceptance_service.py
+?? tests/test_forge_artifact_migration.py.bak-20261109-111312
+?? tests/test_forge_project_repository_store.py.bak-20261109-111312
+?? tests/test_forge_sentinel_guards.py
+?? tests/test_forge_sentinel_reviewers.py
+?? tests/test_forge_sentinel_store.py
+?? tests/test_forge_terminal_service.py.bak-20261108T220858Z
+?? tests/test_gmail_capability_handlers.py
+?? tests/test_google_gmail_api.py
+?? tests/test_google_oauth.py
+?? tests/test_google_tokens.py
+?? tests/test_integrations.py
+?? tests/test_integrations.py.pre_atomic.bak
+?? tests/test_integrations.py.pre_granular_permissions.bak
+?? tests/test_integrations.py.pre_integrity_tests.bak
+?? tests/test_integrations.py.pre_key_rotation.bak
+?? tests/test_integrations.py.pre_key_version.bak
+?? tests/test_integrations.py.pre_oauth_foundation.bak
+?? tests/test_integrations.py.pre_oauth_hardening.bak
+?? tests/test_integrations.py.pre_rotation_audit.bak
+?? tests/test_integrations.py.pre_tamper_test.bak
+?? tests/test_integrations.py.pre_tenant_isolation.bak
+?? tests/test_owner_attention_events.py
+?? tests/test_owner_attention_policy.py
+?? tests/test_owner_attention_service.py
+?? tests/test_owner_attention_worker.py
+?? tests/test_owner_lifestyle.py
+?? tests/test_owner_lifestyle_api.py
+?? tests/test_owner_lifestyle_persistence.py
+?? tests/test_web_conversation.py.bak
+?? tests/test_web_conversation.py.bak-20261109-115204
+
+
+FINDINGS:
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] phase0_persistence_install.sh:769
+    return True
+[APPLICATION] [PLACEHOLDER / DEMO] phase2_web_installer.sh:481
+    <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ business.name }} — Assistant</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css'
+[APPLICATION] [PLACEHOLDER / DEMO] .forge_terminal_ui_patch.py:73
+    placeholder="help, ls, cat, check, build, test, run ..."
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] add_gmail_capabilities.py:140
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] add_gmail_capabilities.py:173
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] add_gmail_orchestrator_tests.py:51
+    success=True,
+[TEST] [MOCK / STUB] tests/test_speech_engine.py:1
+    from unittest.mock import patch
+[TEST] [MOCK / STUB] tests/test_voice_controller.py:2
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_voice_controller.py:29
+    speech_engine = Mock(spec=SpeechEngine)
+[TEST] [MOCK / STUB] tests/test_voice_controller.py:52
+    speech_engine=Mock(spec=SpeechEngine),
+[TEST] [MOCK / STUB] tests/test_voice_controller.py:65
+    speech_engine=Mock(spec=SpeechEngine),
+[TEST] [MOCK / STUB] tests/test_voice_controller.py:78
+    speech_engine=Mock(spec=SpeechEngine),
+[TEST] [MOCK / STUB] tests/test_assistant_processor.py:4
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_assistant_processor.py:32
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] tests/test_assistant_processor.py:36
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:2
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_action_executor.py:25
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:41
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:57
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:72
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:87
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:102
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:103
+    safety_policy = Mock()
+[TEST] [MOCK / STUB] tests/test_action_executor.py:123
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:126
+    safety_policy = Mock()
+[TEST] [MOCK / STUB] tests/test_action_executor.py:148
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:160
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:172
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:186
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:203
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_action_executor.py:240
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_assistant_orchestrator.py:4
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_assistant_orchestrator.py:79
+    processor = Mock(spec=StructuredAssistantProcessor)
+[TEST] [MOCK / STUB] tests/test_assistant_orchestrator.py:80
+    executor = Mock(spec=CapabilityExecutor)
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_assistant_orchestrator.py:232
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_assistant_orchestrator.py:362
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_assistant_orchestrator.py:468
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_assistant_orchestrator.py:563
+    success=True,
+[TEST] [MOCK / STUB] tests/test_end_to_end_assistant.py:3
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_end_to_end_assistant.py:73
+    processor = Mock(spec=StructuredAssistantProcessor)
+[TEST] [MOCK / STUB] tests/test_end_to_end_assistant.py:74
+    executor = Mock(spec=CapabilityExecutor)
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_fake_ai_provider.py:1
+    from app.ai.fake_provider import FakeAIProvider
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_fake_ai_provider.py:5
+    def test_fake_provider_returns_interpretation():
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_fake_ai_provider.py:6
+    provider = FakeAIProvider()
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:4
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:34
+    def make_memory_context_builder() -> Mock:
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:35
+    builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:44
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:45
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:81
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:82
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:126
+    ai_provider=Mock(spec=AIProvider),
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:132
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:133
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:151
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:152
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:178
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_validation.py:179
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:39
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:62
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:83
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:86
+    parser = Mock()
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:111
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:121
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:134
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:149
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:164
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:185
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_interpreting_ai_provider.py:190
+    parser = Mock()
+[TEST] [MOCK / STUB] tests/test_assistant_processor_context.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_assistant_processor_context.py:50
+    builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] tests/test_assistant_processor_context.py:154
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] tests/test_automation_service.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_automation_service.py:62
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [MOCK / STUB] tests/test_automation_service.py:157
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [MOCK / STUB] tests/test_automation_service.py:177
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [MOCK / STUB] tests/test_automation_service.py:188
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [MOCK / STUB] tests/test_research_service.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_research_service.py:64
+    def make_provider() -> Mock:
+[TEST] [MOCK / STUB] tests/test_research_service.py:65
+    provider = Mock(spec=ResearchProvider)
+[TEST] [MOCK / STUB] tests/test_research_service.py:387
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_research_service.py:390
+    validator = Mock()
+[TEST] [MOCK / STUB] tests/test_research_service.py:409
+    validator = Mock()
+[TEST] [MOCK / STUB] tests/test_research_orchestrator.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_research_orchestrator.py:67
+    def make_service() -> Mock:
+[TEST] [MOCK / STUB] tests/test_research_orchestrator.py:68
+    service = Mock(spec=ResearchService)
+[TEST] [MOCK / STUB] tests/test_research_orchestrator.py:74
+    service: Mock | None = None,
+[TEST] [MOCK / STUB] tests/test_research_orchestrator.py:224
+    provider = Mock(spec=ResearchProvider)
+[TEST] [MOCK / STUB] tests/test_research_orchestrator.py:254
+    validator = Mock(spec=ResearchResultValidator)
+[TEST] [MOCK / STUB] tests/test_research_orchestrator.py:276
+    validator = Mock(spec=ResearchResultValidator)
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_capability.py:98
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_capability.py:128
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_capability.py:142
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_capability.py:170
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_capability_router.py:359
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_capability_router.py:380
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_capability_router.py:463
+    success=True,
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_research_provider.py:8
+    class StubResearchProvider(ResearchProvider):
+[TEST] [MOCK / STUB] tests/test_research_provider.py:13
+    summary="Stub research completed.",
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_research_provider.py:30
+    def test_stub_provider_implements_research_contract():
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_research_provider.py:31
+    provider = StubResearchProvider()
+[TEST] [MOCK / STUB] tests/test_research_provider.py:38
+    assert result.summary == "Stub research completed."
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_capability_executor.py:92
+    success=True,
+[TEST] [FAKE / SIMULATION] tests/test_purchase_application.py:41
+    """Minimal transaction fake for application-service behavior tests."""
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_purchase_application.py:59
+    return True
+[TEST] [FAKE / SIMULATION] tests/test_purchase_application.py:79
+    """Transaction fake that injects one controlled failure."""
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_purchase_application.py:92
+    return True
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_commercial_transaction.py:47
+    return True
+[TEST] [MOCK / STUB] tests/test_android_input_engine.py:2
+    from unittest.mock import patch
+[TEST] [MOCK / STUB] tests/test_conversation_coordinator.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_conversation_coordinator.py:226
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] tests/test_conversation_coordinator.py:292
+    executor = Mock(spec=CapabilityExecutor)
+[TEST] [MOCK / STUB] tests/test_conversation_coordinator.py:421
+    executor = Mock(spec=CapabilityExecutor)
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:1
+    from unittest.mock import Mock, patch
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:27
+    process = Mock()
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:48
+    process = Mock()
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:63
+    process = Mock()
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:104
+    process = Mock()
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:119
+    process = Mock()
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:134
+    process = Mock()
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:157
+    process = Mock()
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:207
+    old_process = Mock()
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:210
+    new_process = Mock()
+[TEST] [FAKE / SIMULATION] tests/test_speech_engine_cancellation_attack.py:215
+    # Simulate another speech operation replacing the active process
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:229
+    old_process = Mock()
+[TEST] [MOCK / STUB] tests/test_speech_engine_cancellation_attack.py:232
+    new_process = Mock()
+[TEST] [FAKE / SIMULATION] tests/test_speech_engine_cancellation_attack.py:252
+    # Simulate a new speech operation becoming active while the
+[TEST] [MOCK / STUB] tests/test_auth_step1_complete.py:2
+    from unittest.mock import patch
+[TEST] [MOCK / STUB] tests/test_auth_step1_complete.py:51
+    with patch("app.auth.passwords.hashlib.scrypt", wraps=hashlib.scrypt) as mocked:
+[TEST] [MOCK / STUB] tests/test_auth_step1_complete.py:53
+    kwargs = mocked.call_args.kwargs
+[TEST] [MOCK / STUB] tests/test_whatsapp_channel_attack.py:4
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_whatsapp_service_attack.py:5
+    from unittest.mock import Mock
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:45
+    class FakeWhatsAppProvider(WhatsAppProvider):
+[TEST] [MOCK / STUB] tests/test_whatsapp_service_attack.py:172
+    handle: Mock | None = None,
+[TEST] [MOCK / STUB] tests/test_whatsapp_service_attack.py:177
+    handle = Mock(
+[TEST] [MOCK / STUB] tests/test_whatsapp_service_attack.py:189
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:198
+    provider: FakeWhatsAppProvider,
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:250
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:282
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:316
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:341
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:382
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:421
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:457
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] tests/test_whatsapp_service_attack.py:459
+    wrong_business_response = Mock(
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:501
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:582
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] tests/test_whatsapp_service_attack.py:601
+    second_handle = Mock(
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:642
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:675
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] tests/test_whatsapp_service_attack.py:688
+    handle = Mock(side_effect=[first_response, second_response])
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:787
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] tests/test_whatsapp_service_attack.py:789
+    handle = Mock(
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:853
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] tests/test_whatsapp_service_attack.py:855
+    handle = Mock(
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:899
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:951
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:990
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:1033
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] tests/test_whatsapp_service_attack.py:1133
+    provider = FakeWhatsAppProvider()
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_enforcement.py:200
+    raise RuntimeError("simulated safety-state database failure")
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_enforcement.py:234
+    # Simulate a fresh process using the same persistent database.
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:83
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:119
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:145
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:174
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:203
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:206
+    telemetry = Mock()
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:221
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:224
+    telemetry = Mock()
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:269
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_execution_telemetry.py:304
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:59
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:69
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:88
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:91
+    parser = Mock(spec=AICapabilityResponseParser)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:111
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:131
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:141
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:151
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:161
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:174
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:186
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_ai_provider.py:214
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] tests/test_structured_processor.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_structured_processor.py:38
+    def make_builder() -> Mock:
+[TEST] [MOCK / STUB] tests/test_structured_processor.py:39
+    builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] tests/test_azure_speech_engine.py:2
+    from unittest.mock import MagicMock, patch
+[TEST] [FAKE / SIMULATION] tests/test_azure_speech_engine.py:91
+    response.read.return_value = b"fake-mp3-audio"
+[TEST] [FAKE / SIMULATION] tests/test_azure_speech_engine.py:97
+    assert audio == b"fake-mp3-audio"
+[TEST] [FAKE / SIMULATION] tests/test_azure_speech_engine.py:155
+    patch.object(engine, "_synthesize", return_value=b"fake-mp3"),
+[TEST] [MOCK / STUB] tests/test_speech_engine_factory.py:1
+    from unittest.mock import patch
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:273
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:280
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:316
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:323
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:351
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:358
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:392
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:399
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:438
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:445
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:487
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:494
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:543
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] tests/test_d5_safety_service.py:550
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_execution_contract.py:60
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_execution_contract.py:117
+    success=True,
+[TEST] [MOCK / STUB] tests/test_structured_assistant_orchestrator.py:4
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_structured_assistant_orchestrator.py:92
+    processor = Mock(spec=StructuredAssistantProcessor)
+[TEST] [MOCK / STUB] tests/test_structured_assistant_orchestrator.py:93
+    executor = Mock(spec=CapabilityExecutor)
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_structured_assistant_orchestrator.py:326
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_structured_assistant_orchestrator.py:478
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_structured_assistant_orchestrator.py:529
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] tests/test_structured_assistant_orchestrator.py:645
+    success=True,
+[TEST] [FAKE / SIMULATION] tests/test_forge_job_store.py:420
+    SELECT RAISE(ABORT, 'simulated spec write failure');
+[TEST] [FAKE / SIMULATION] tests/test_forge_job_store.py:425
+    with pytest.raises(Exception, match="simulated spec write failure"):
+[TEST] [FAKE / SIMULATION] tests/test_forge_job_store.py:678
+    raise RuntimeError("simulated iteration failure")
+[TEST] [FAKE / SIMULATION] tests/test_forge_job_store.py:723
+    raise SystemExit("simulated worker-thread exit")
+[TEST] [MOCK / STUB] tests/test_forge_brain_candidate_executor_runner.py:3
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_forge_brain_candidate_executor_runner.py:32
+    processor = Mock(spec=StructuredAssistantProcessor)
+[TEST] [MOCK / STUB] tests/test_forge_brain_candidate_executor_runner.py:40
+    runner = Mock()
+[TEST] [MOCK / STUB] tests/test_gmail_capability_handlers.py:2
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_gmail_capability_handlers.py:15
+    integrations = Mock()
+[TEST] [MOCK / STUB] tests/test_gmail_capability_handlers.py:20
+    token_manager = Mock()
+[TEST] [MOCK / STUB] tests/test_gmail_capability_handlers.py:23
+    manager_class = Mock(return_value=token_manager)
+[TEST] [MOCK / STUB] tests/test_gmail_capability_handlers.py:29
+    handler._api = Mock()
+[TEST] [MOCK / STUB] tests/test_owner_lifestyle.py:3
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] tests/test_owner_lifestyle.py:12
+    repo = Mock()
+[TEST] [MOCK / STUB] tests/test_owner_lifestyle.py:13
+    memberships = Mock()
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:272
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:279
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:315
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:322
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:350
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:357
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:391
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:398
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:437
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:444
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:486
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:493
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:542
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/test_d5_safety_service.d6_1_backup.py:549
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] core/tenant.py:26
+    return True
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] channels/whatsapp_adapter.py:9
+    return True
+[APPLICATION] [PLACEHOLDER / DEMO] deploy/forge-runner/install-host.sh:122
+    raise SystemExit("Systemd project path placeholder was not found.")
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine.py:1
+    from unittest.mock import patch
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_voice_controller.py:2
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_voice_controller.py:29
+    speech_engine = Mock(spec=SpeechEngine)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_voice_controller.py:52
+    speech_engine=Mock(spec=SpeechEngine),
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_voice_controller.py:65
+    speech_engine=Mock(spec=SpeechEngine),
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_voice_controller.py:78
+    speech_engine=Mock(spec=SpeechEngine),
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor.py:4
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor.py:32
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor.py:36
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:2
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:25
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:41
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:57
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:72
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:87
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:102
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:103
+    safety_policy = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:123
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:126
+    safety_policy = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:148
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:160
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:172
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:186
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:203
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_action_executor.py:240
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:2
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:40
+    processor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:41
+    executor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:77
+    processor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:78
+    executor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:113
+    processor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:114
+    executor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:163
+    processor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:164
+    executor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:200
+    processor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:201
+    executor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:229
+    processor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:230
+    executor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:257
+    processor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_orchestrator.py:258
+    executor = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_end_to_end_assistant.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_end_to_end_assistant.py:32
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_end_to_end_assistant.py:79
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_fake_ai_provider.py:1
+    from app.ai.fake_provider import FakeAIProvider
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_fake_ai_provider.py:5
+    def test_fake_provider_returns_interpretation():
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_fake_ai_provider.py:6
+    provider = FakeAIProvider()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:4
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:34
+    def make_memory_context_builder() -> Mock:
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:35
+    builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:44
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:45
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:81
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:82
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:126
+    ai_provider=Mock(spec=AIProvider),
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:132
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:133
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:151
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:152
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:178
+    provider = Mock(spec=AIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_validation.py:179
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:39
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:62
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:83
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:86
+    parser = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:111
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:121
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:134
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:149
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:164
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:185
+    raw_provider = Mock(spec=RawAIProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_interpreting_ai_provider.py:190
+    parser = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_context.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_context.py:50
+    builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_processor_context.py:154
+    validator = Mock(spec=AIInterpretationValidator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_automation_service.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_automation_service.py:62
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_automation_service.py:157
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_automation_service.py:177
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_automation_service.py:188
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_service.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_service.py:64
+    def make_provider() -> Mock:
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_service.py:65
+    provider = Mock(spec=ResearchProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_service.py:387
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_service.py:390
+    validator = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_service.py:409
+    validator = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_orchestrator.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_orchestrator.py:67
+    def make_service() -> Mock:
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_orchestrator.py:68
+    service = Mock(spec=ResearchService)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_orchestrator.py:74
+    service: Mock | None = None,
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_orchestrator.py:224
+    provider = Mock(spec=ResearchProvider)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_orchestrator.py:254
+    validator = Mock(spec=ResearchResultValidator)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_orchestrator.py:276
+    validator = Mock(spec=ResearchResultValidator)
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability.py:94
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability.py:124
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability.py:138
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability.py:166
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:29
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:56
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:71
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:86
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:102
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:128
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:152
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:176
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:185
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:229
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:248
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_router.py:267
+    success=True,
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_research_provider.py:8
+    class StubResearchProvider(ResearchProvider):
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_provider.py:13
+    summary="Stub research completed.",
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_research_provider.py:30
+    def test_stub_provider_implements_research_contract():
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_research_provider.py:31
+    provider = StubResearchProvider()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_research_provider.py:38
+    assert result.summary == "Stub research completed."
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_executor.py:47
+    success=True,
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_capability_executor.py:198
+    success=True,
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_purchase_application.py:41
+    """Minimal transaction fake for application-service behavior tests."""
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_purchase_application.py:59
+    return True
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_purchase_application.py:79
+    """Transaction fake that injects one controlled failure."""
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_purchase_application.py:92
+    return True
+[TEST] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/tests/test_commercial_transaction.py:47
+    return True
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_android_input_engine.py:2
+    from unittest.mock import patch
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_conversation_coordinator.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_conversation_coordinator.py:204
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_conversation_coordinator.py:328
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_conversation_coordinator.py:490
+    memory_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_conversation_coordinator.py:560
+    memory_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_conversation_coordinator.py:641
+    memory_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_conversation_coordinator.py:699
+    memory_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_conversation_coordinator.py:936
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_conversation_coordinator.py:1019
+    memory_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_runtime.py:3
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_assistant_runtime.py:257
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:1
+    from unittest.mock import Mock, patch
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:27
+    process = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:48
+    process = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:63
+    process = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:104
+    process = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:119
+    process = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:134
+    process = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:157
+    process = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:207
+    old_process = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:210
+    new_process = Mock()
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:215
+    # Simulate another speech operation replacing the active process
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:229
+    old_process = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:232
+    new_process = Mock()
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_speech_engine_cancellation_attack.py:252
+    # Simulate a new speech operation becoming active while the
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_auth_step1_complete.py:2
+    from unittest.mock import patch
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_auth_step1_complete.py:51
+    with patch("app.auth.passwords.hashlib.scrypt", wraps=hashlib.scrypt) as mocked:
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_auth_step1_complete.py:53
+    kwargs = mocked.call_args.kwargs
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_channel_attack.py:4
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_service_attack.py:5
+    from unittest.mock import Mock
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:45
+    class FakeWhatsAppProvider(WhatsAppProvider):
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_service_attack.py:172
+    handle: Mock | None = None,
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_service_attack.py:177
+    handle = Mock(
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_service_attack.py:189
+    orchestrator = Mock(spec=AssistantOrchestrator)
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:198
+    provider: FakeWhatsAppProvider,
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:250
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:282
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:316
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:341
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:382
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:421
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:457
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_service_attack.py:459
+    wrong_business_response = Mock(
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:501
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:582
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_service_attack.py:601
+    second_handle = Mock(
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:642
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:675
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_service_attack.py:688
+    handle = Mock(side_effect=[first_response, second_response])
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:787
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_service_attack.py:789
+    handle = Mock(
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:853
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_whatsapp_service_attack.py:855
+    handle = Mock(
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:899
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:951
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:990
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:1033
+    provider = FakeWhatsAppProvider()
+[TEST] [POSSIBLE FAKE PROVIDER] backups/founder-auth/tests/test_whatsapp_service_attack.py:1133
+    provider = FakeWhatsAppProvider()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:1
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:83
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:119
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:145
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:174
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:203
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:206
+    telemetry = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:221
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:224
+    telemetry = Mock()
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:269
+    operation = Mock(spec=BusinessOperation)
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_execution_telemetry.py:304
+    operation = Mock(spec=BusinessOperation)
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:272
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:279
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:315
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:322
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:350
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:357
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:391
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:398
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:437
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:444
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:486
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:493
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:542
+    raise RuntimeError("simulated audit persistence failure")
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_service.py:549
+    with pytest.raises(RuntimeError, match="simulated audit persistence failure"):
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_d5_channel_runtime_attack.py:4
+    from unittest.mock import Mock
+[TEST] [MOCK / STUB] backups/founder-auth/tests/test_d5_channel_runtime_attack.py:141
+    memory_context_builder = Mock(spec=MemoryContextBuilder)
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_enforcement.py:200
+    raise RuntimeError("simulated safety-state database failure")
+[TEST] [FAKE / SIMULATION] backups/founder-auth/tests/test_d5_safety_enforcement.py:234
+    # Simulate a fresh process using the same persistent database.
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/ai/provider.py:18
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE FAKE PROVIDER] backups/founder-auth/app/ai/fake_provider.py:8
+    class FakeAIProvider(AIProvider):
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/ai/raw_provider.py:18
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/app/memory/in_memory_repository.py:54
+    return True
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/app/trust/action_policy.py:18
+    return True
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/voice/engine.py:12
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/voice/engine.py:17
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/voice/input_engine.py:12
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/voice/conversation_coordinator.py:23
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/services/business_operation.py:17
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/research/provider.py:13
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/app/commercial/transaction.py:26
+    Return True when this event was newly accepted.
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/app/commercial/in_memory_transaction.py:116
+    return True
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/payment/verifier.py:35
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/payment/fact_extractor.py:22
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] backups/founder-auth/app/persistence/commercial_transaction.py:45
+    return True
+[APPLICATION] [FAKE / SIMULATION] backups/founder-auth/app/auth/service.py:66
+    # One expensive dummy hash makes the unknown-account path exercise the same
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/whatsapp/provider.py:46
+    raise NotImplementedError
+[APPLICATION] [PLACEHOLDER / DEMO] backups/founder-auth/app/web/templates/dashboard.html:1
+    <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ business.name }} — Assistant</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css'
+[APPLICATION] [INCOMPLETE WORK] backups/founder-auth/app/payment/providers/base.py:26
+    raise NotImplementedError
+[TEST] [MOCK / STUB] tests/forge_runner/test_runner_server.py:172
+    "output": "mocked",
+[TEST] [MOCK / STUB] tests/forge_runner/test_runner_server.py:187
+    assert body["output"] == "mocked"
+[APPLICATION] [INCOMPLETE WORK] app/ai/provider.py:18
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE FAKE PROVIDER] app/ai/fake_provider.py:8
+    class FakeAIProvider(AIProvider):
+[APPLICATION] [INCOMPLETE WORK] app/ai/raw_provider.py:18
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] app/ai/structured_provider.py:30
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/memory/in_memory_repository.py:54
+    return True
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/trust/action_policy.py:18
+    return True
+[APPLICATION] [INCOMPLETE WORK] app/voice/engine.py:12
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] app/voice/engine.py:17
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] app/voice/input_engine.py:12
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] app/voice/conversation_coordinator.py:24
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] app/services/business_operation.py:17
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/assistant/capability_handlers.py:64
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/assistant/capability_handlers.py:85
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/assistant/capability_handlers.py:108
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/assistant/capability_handlers.py:132
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/assistant/capability_handlers.py:270
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/assistant/capability_handlers.py:294
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/assistant/capability_handlers.py:312
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/assistant/gmail_capability_handlers.py:121
+    success=True,
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/assistant/gmail_capability_handlers.py:154
+    success=True,
+[APPLICATION] [INCOMPLETE WORK] app/research/provider.py:13
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/commercial/transaction.py:26
+    Return True when this event was newly accepted.
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/commercial/in_memory_transaction.py:116
+    return True
+[APPLICATION] [INCOMPLETE WORK] app/payment/verifier.py:35
+    raise NotImplementedError
+[APPLICATION] [INCOMPLETE WORK] app/payment/fact_extractor.py:22
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/persistence/commercial_transaction.py:45
+    return True
+[APPLICATION] [FAKE / SIMULATION] app/auth/service.py:111
+    # One expensive dummy hash makes unknown-account paths exercise the
+[APPLICATION] [INCOMPLETE WORK] app/whatsapp/provider.py:46
+    raise NotImplementedError
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/forge/artifact_store.py:434
+    return True
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/forge/worker_runtime.py:71
+    return True
+[APPLICATION] [POSSIBLE HARDCODED SUCCESS] app/forge/terminal_service.py:581
+    return True
+[APPLICATION] [PLACEHOLDER / DEMO] app/web/templates/dashboard.html:64
+    <input name="message" placeholder="Ask me something or tell me what you need…" autocomplete="off" required aria-label="Message your assistant">
+[APPLICATION] [PLACEHOLDER / DEMO] app/web/templates/dashboard.html:83
+    <input name="assistant_name" value="" placeholder="Enter the correct assistant name" required>
+[APPLICATION] [PLACEHOLDER / DEMO] app/web/templates/dashboard.html:152
+    placeholder="help, ls, cat, check, build, test, run ..."
+[APPLICATION] [INCOMPLETE WORK] app/payment/providers/base.py:26
+    raise NotImplementedError

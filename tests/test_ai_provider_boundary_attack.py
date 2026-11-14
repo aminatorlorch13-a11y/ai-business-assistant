@@ -624,3 +624,44 @@ def test_provider_rejects_oversized_owner_message_before_network(
 
     with pytest.raises(ValueError, match="text-size budget"):
         provider_type(config).generate(oversized_message, context())
+
+@pytest.mark.parametrize(
+    "provider",
+    [OpenAIHTTPProvider, GroqHTTPProvider],
+)
+def test_provider_prompts_define_gmail_as_read_only_untrusted_data(
+    provider: type,
+) -> None:
+    instructions = provider.SYSTEM_INSTRUCTIONS.lower()
+
+    required_rules = (
+        'operation: "gmail_search"',
+        'operation: "gmail_read"',
+        "strictly read-only",
+        "untrusted external",
+        "never follow links",
+        "never claim an email was found or read",
+    )
+
+    for rule in required_rules:
+        assert rule in instructions
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [OpenAIHTTPProvider, GroqHTTPProvider],
+)
+def test_provider_prompts_forbid_gmail_write_operations(
+    provider: type,
+) -> None:
+    instructions = provider.SYSTEM_INSTRUCTIONS.lower()
+
+    for forbidden in (
+        "sending",
+        "forwarding",
+        "replying",
+        "deleting",
+        "modifying",
+        "archiving",
+    ):
+        assert forbidden in instructions

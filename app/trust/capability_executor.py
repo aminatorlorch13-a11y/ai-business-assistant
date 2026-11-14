@@ -88,6 +88,19 @@ class CapabilityExecutor:
                 "Capability execution is not permitted for this business."
             )
 
+        if (
+            request.capability.value == "communication"
+            and request.operation in {"gmail_search", "gmail_read"}
+        ):
+            if request.integration != "gmail":
+                raise PermissionError(
+                    "Gmail operations require the Gmail integration."
+                )
+            if request.actor_user_id != tenant.principal.user_id:
+                raise PermissionError(
+                    "Gmail operation actor does not match the authenticated user."
+                )
+
         self._role_policy.require(
             tenant,
             request,

@@ -28,6 +28,10 @@ from app.forge.verification import (
     validate_candidate_verification_report,
 )
 from app.forge.worker import ForgeExecutionResult
+from app.forge.sentinel_coordinator import (
+    ForgeSentinelCoordinator,
+    ForgeSentinelCoordinatorError,
+)
 
 
 _ARTIFACT_REF = re.compile(r"^forge-artifact://([0-9a-f]{32})$")
@@ -65,6 +69,7 @@ class ForgeTerminalService:
         artifact_vault: ForgeArtifactVault,
         workspace_root: str | Path | None = None,
         runner_client: Any | None = None,
+        sentinel_coordinator: ForgeSentinelCoordinator | None = None,
     ) -> None:
         if not isinstance(job_store, ForgeJobStore):
             raise TypeError("job_store must be a ForgeJobStore.")
@@ -73,10 +78,19 @@ class ForgeTerminalService:
         if not isinstance(artifact_vault, ForgeArtifactVault):
             raise TypeError("artifact_vault must be a ForgeArtifactVault.")
 
+        if (
+            sentinel_coordinator is not None
+            and not isinstance(sentinel_coordinator, ForgeSentinelCoordinator)
+        ):
+            raise TypeError(
+                "sentinel_coordinator must be a ForgeSentinelCoordinator or None."
+            )
+
         self._jobs = job_store
         self._artifacts = artifact_store
         self._vault = artifact_vault
         self._runner = runner_client
+        self._sentinel = sentinel_coordinator
         configured_root = (
             workspace_root
             if workspace_root is not None
@@ -97,12 +111,53 @@ class ForgeTerminalService:
             raise ValueError("Forge identity value is too long.")
         return values
 
+    def _require_sentinel_approval(
+        self,
+        business_id: str,
+        project_id: str,
+        job_id: str,
+        artifact_reference: str,
+    ) -> dict[str, Any] | None:
+        if self._sentinel is None:
+            return None
+        try:
+            return self._sentinel.require_approved(
+                business_id=business_id,
+                project_id=project_id,
+                job_id=job_id,
+                artifact_reference=artifact_reference,
+            )
+        except ForgeSentinelCoordinatorError as exc:
+            raise ForgeTerminalSessionError(
+                "Sentinel approval is missing, blocked, or does not match this artifact."
+            ) from exc
+
     def open_session(
         self, business_id: str, project_id: str, job_id: str
     ) -> dict[str, Any]:
         identity = self._identity(business_id, project_id, job_id)
         existing = self._sessions.get(identity)
         if existing is not None:
+            current = self._jobs.get(*identity)
+            if current is None:
+                raise ForgeTerminalSessionError(
+                    "Forge job was not found in this scope."
+                )
+            current_status = getattr(
+                current.job.status, "value", current.job.status
+            )
+            current_checkpoint = current.job.checkpoint or {}
+            if (
+                current_status != ForgeJobStatus.COMPLETED_VAULTED.value
+                or current_checkpoint.get("artifact_reference")
+                != existing.artifact_reference
+            ):
+                raise ForgeTerminalSessionError(
+                    "This terminal session is no longer attached to the current approved candidate."
+                )
+            self._require_sentinel_approval(
+                business_id, project_id, job_id, existing.artifact_reference
+            )
             return {
                 "job_id": job_id,
                 "artifact_reference": existing.artifact_reference,
@@ -136,6 +191,10 @@ class ForgeTerminalService:
         match = _ARTIFACT_REF.fullmatch(artifact_reference)
         if match is None:
             raise ForgeTerminalSessionError("The job contains an invalid artifact reference.")
+
+        self._require_sentinel_approval(
+            business_id, project_id, job_id, artifact_reference
+        )
 
         raw = self._artifacts.read(match.group(1), business_id, project_id)
         if raw is None or len(raw) > _MAX_ARTIFACT_BYTES:
@@ -264,6 +323,40 @@ class ForgeTerminalService:
             with target.open("x", encoding="utf-8", newline="") as handle:
                 handle.write(content)
 
+    def _require_current_session(
+        self,
+        identity: tuple[str, str, str],
+        session: _TerminalSession,
+    ) -> None:
+        current = self._jobs.get(*identity)
+        if current is None:
+            raise ForgeTerminalSessionError(
+                "Forge job was not found in this scope."
+            )
+
+        current_status = getattr(
+            current.job.status, "value", current.job.status
+        )
+        checkpoint = current.job.checkpoint or {}
+
+        if (
+            current_status != ForgeJobStatus.COMPLETED_VAULTED.value
+            or not isinstance(checkpoint, Mapping)
+            or checkpoint.get("artifact_reference")
+            != session.artifact_reference
+        ):
+            raise ForgeTerminalSessionError(
+                "This terminal session is stale or no longer attached "
+                "to the current approved candidate."
+            )
+
+        self._require_sentinel_approval(
+            session.business_id,
+            session.project_id,
+            session.job_id,
+            session.artifact_reference,
+        )
+
     def execute(
         self, business_id: str, project_id: str, job_id: str, command: str
     ) -> dict[str, Any]:
@@ -271,6 +364,7 @@ class ForgeTerminalService:
         session = self._sessions.get(identity)
         if session is None:
             raise ForgeTerminalSessionError("Open the Forge terminal session first.")
+        self._require_current_session(identity, session)
 
         raw = command.strip() if isinstance(command, str) else ""
         parts = raw.split(None, 1)
@@ -292,6 +386,8 @@ class ForgeTerminalService:
                 self._runner.sync_files(
                     session.runner_session_id, self._workspace_snapshot(session)
                 )
+                # Revalidate immediately before isolated execution.
+                self._require_current_session(identity, session)
                 result = self._runner.execute(
                     session.runner_session_id, parts[1], timeout_seconds=30
                 )
@@ -327,6 +423,7 @@ class ForgeTerminalService:
         session = self._sessions.get(identity)
         if session is None:
             raise ForgeTerminalSessionError("Open the Forge terminal session first.")
+        self._require_current_session(identity, session)
 
         files: dict[str, str] = {}
         for path in sorted(session.workspace.rglob("*")):
@@ -371,6 +468,38 @@ class ForgeTerminalService:
         artifact_reference = self._vault(
             session.spec, ForgeExecutionResult(candidate=candidate)
         )
+        if (
+            not isinstance(artifact_reference, str)
+            or not _ARTIFACT_REF.fullmatch(artifact_reference)
+        ):
+            raise ForgeTerminalSessionError(
+                "The artifact vault returned an invalid reference."
+            )
+
+        # Assess the immutable revision before it can become the current
+        # checkpoint. A blocked revision remains vaulted but unattached.
+        if self._sentinel is not None:
+            try:
+                assessment = self._sentinel.assess(
+                    business_id=business_id,
+                    project_id=project_id,
+                    job_id=job_id,
+                    artifact_reference=artifact_reference,
+                )
+                if assessment.get("status") != "ready_for_user_acceptance":
+                    raise ForgeTerminalSessionError(
+                        "Sentinel blocked this revision. The previous current candidate remains unchanged."
+                    )
+                self._sentinel.require_approved(
+                    business_id=business_id,
+                    project_id=project_id,
+                    job_id=job_id,
+                    artifact_reference=artifact_reference,
+                )
+            except ForgeSentinelCoordinatorError as exc:
+                raise ForgeTerminalSessionError(
+                    "Sentinel could not approve this revision. The previous current candidate remains unchanged."
+                ) from exc
 
         current_record = self._jobs.get(
             business_id=business_id,

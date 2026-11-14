@@ -174,7 +174,7 @@ def add_event(
     )
 
 
-def test_founder_operations_lists_businesses_with_owner_and_configuration(
+def test_founder_operations_lists_businesses_without_owner_identity_and_with_configuration(
     tmp_path,
 ):
     db = make_database(tmp_path)
@@ -207,11 +207,10 @@ def test_founder_operations_lists_businesses_with_owner_and_configuration(
         "business-1",
         "business-2",
     ]
-    assert views[0].owner == {
-        "user_id": "owner-1",
-        "display_name": "Alice",
-        "email": "alice@example.com",
-    }
+    assert not hasattr(views[0], "owner")
+    serialized = str(views[0].as_dict()).lower()
+    assert "alice@example.com" not in serialized
+    assert "owner-1" not in serialized
     assert views[0].assistant == {
         "name": "Orbit",
         "voice": "female",
@@ -320,7 +319,6 @@ def test_founder_operations_reports_paid_evidence(
     assert view.commercial["purchase_count"] == 1
     assert view.commercial["last_purchase"] == {
         "provider": "test-provider",
-        "provider_event_id": "payment-1",
         "amount": "250.00",
         "currency": "ZAR",
         "paid_at": NOW.isoformat(),
@@ -368,10 +366,11 @@ def test_founder_operations_reports_actual_events(
     assert view is not None
     assert view.operational["recent_event_count"] == 2
     assert view.operational["last_event_at"] == NOW.isoformat()
-    assert [event["event_id"] for event in events] == [
-        "event-new",
-        "event-old",
+    assert [event["occurred_at"] for event in events] == [
+        NOW.isoformat(),
+        (NOW - timedelta(minutes=10)).isoformat(),
     ]
+    assert all("event_id" not in event for event in events)
 
 
 def test_founder_operations_global_recent_events_are_available(
@@ -402,10 +401,11 @@ def test_founder_operations_global_recent_events_are_available(
 
     events = FounderOperationsService(db).recent_events()
 
-    assert [event["event_id"] for event in events] == [
-        "event-2",
-        "event-1",
+    assert [event["business_id"] for event in events] == [
+        "business-2",
+        "business-1",
     ]
+    assert all("event_id" not in event for event in events)
 
 
 def test_founder_operations_missing_business_returns_none(
@@ -475,10 +475,12 @@ def test_founder_operations_does_not_expose_platform_secrets(
 
     events = FounderOperationsService(db).recent_events()
 
-    assert events[0]["metadata"] == {"source": "test"}
-    assert "password" not in str(events[0]).lower()
-    assert "secret" not in str(events[0]).lower()
-    assert "token" not in str(events[0]).lower()
+    serialized = str(events[0]).lower()
+    for forbidden in (
+        "metadata", "correlation_id", "user_id", "event_id",
+        "password", "secret", "token",
+    ):
+        assert forbidden not in serialized
 
 
 def test_founder_operations_returns_none_owner_when_no_owner_membership_exists(
@@ -502,4 +504,6 @@ def test_founder_operations_returns_none_owner_when_no_owner_membership_exists(
     view = FounderOperationsService(db).get_business("business-1")
 
     assert view is not None
-    assert view.owner is None
+    assert not hasattr(view, "owner")
+    assert view.name == "Business Without Owner Membership"
+    assert view.assistant["name"] == "Orbit"

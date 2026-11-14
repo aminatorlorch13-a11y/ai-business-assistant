@@ -538,6 +538,7 @@ class SQLiteCapabilityConfirmationRepository:
             reason=row["reason"],
             channel=row["channel"],
             integration=row["integration"],
+            actor_user_id=row["user_id"],
         )
 
         return CapabilityConfirmation(

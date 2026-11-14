@@ -246,6 +246,7 @@ class AssistantOrchestrator:
                 business_id=self._business.business_id,
                 assistant_name=self._business.assistant_name,
                 message=result.response or "",
+                speech_direction=result.speech_direction,
             )
 
         responses: list[str] = []
@@ -256,6 +257,11 @@ class AssistantOrchestrator:
                 business_id=self._business.business_id,
                 channel=channel,
                 integration=integration,
+                actor_user_id=(
+                    tenant.principal.user_id
+                    if tenant is not None
+                    else None
+                ),
             )
 
             is_memory_save = (
@@ -332,6 +338,7 @@ class AssistantOrchestrator:
             business_id=self._business.business_id,
             assistant_name=self._business.assistant_name,
             message="\n".join(responses),
+            speech_direction=(result.speech_direction if result.response else None),
         )
 
     def _execute_confirmation(

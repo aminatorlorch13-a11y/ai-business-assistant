@@ -180,6 +180,8 @@ class AzureSpeechEngine(SpeechEngine):
         if not isinstance(request, SpeechRequest):
             raise TypeError("request must be a SpeechRequest.")
 
+        self.validate_request(request)
+
         ssml = self._build_ssml(request)
 
         with self._lock:

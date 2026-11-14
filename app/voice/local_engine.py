@@ -36,6 +36,8 @@ class AndroidSpeechEngine(SpeechEngine):
         if not isinstance(request, SpeechRequest):
             raise TypeError("request must be a SpeechRequest.")
 
+        self.validate_request(request)
+
         profile = self._profile_resolver.resolve(request.voice)
 
         command = [self.COMMAND]

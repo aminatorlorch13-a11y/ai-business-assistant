@@ -173,17 +173,17 @@ def test_stale_terminal_session_cannot_overwrite_newer_revision(
         "business-1", "project-1", "job-1"
     )
 
-    stale_service.execute(
-        "business-1",
-        "project-1",
-        "job-1",
-        'write src/main.py "print(200)"',
-    )
+    # A stale session must be rejected before it can execute a command.
+    with pytest.raises(ForgeTerminalSessionError, match="stale"):
+        stale_service.execute(
+            "business-1",
+            "project-1",
+            "job-1",
+            'write src/main.py "print(200)"',
+        )
 
-    with pytest.raises(
-        ForgeTerminalSessionError,
-        match="stale",
-    ):
+    # It must also be unable to save or replace the newer revision.
+    with pytest.raises(ForgeTerminalSessionError, match="stale"):
         stale_service.save_session(
             "business-1", "project-1", "job-1"
         )

@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 from app.assistant.ai_capability_request import AICapabilityRequest
 from app.assistant.ai_result import AIResult
+from app.assistant.speech_direction import SpeechDirection
 from app.assistant.capability import Capability
 
 
@@ -32,7 +33,7 @@ class AICapabilityResponseParser:
         }
     )
 
-    ALLOWED_FIELDS = REQUIRED_FIELDS
+    ALLOWED_FIELDS = REQUIRED_FIELDS | frozenset({'speech_direction'})
 
     REQUEST_REQUIRED_FIELDS = frozenset(
         {
@@ -72,10 +73,45 @@ class AICapabilityResponseParser:
             data["capability_requests"]
         )
 
+        speech_direction = self._parse_speech_direction(
+            data.get('speech_direction')
+        )
+
         return AIResult(
             response=response,
             capability_requests=capability_requests,
+            speech_direction=speech_direction,
         )
+
+    @staticmethod
+    def _parse_speech_direction(value: object) -> SpeechDirection | None:
+        if value is None:
+            return None
+        if not isinstance(value, Mapping):
+            raise ValueError("speech_direction must be a mapping or null.")
+
+        allowed = {"emotion", "delivery", "pitch"}
+        unknown = value.keys() - allowed
+        if unknown:
+            raise ValueError(
+                f"speech_direction contains unknown fields: {sorted(unknown)}."
+            )
+
+        emotion = value.get("emotion", "neutral")
+        delivery = value.get("delivery", "normal")
+        pitch = value.get("pitch")
+
+        if not isinstance(emotion, str) or not isinstance(delivery, str):
+            raise ValueError("Speech emotion and delivery must be strings.")
+
+        try:
+            return SpeechDirection(
+                emotion=emotion,
+                delivery=delivery,
+                pitch=pitch,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid speech_direction: {exc}") from exc
 
     @staticmethod
     def _validate_mapping(data: object) -> None:

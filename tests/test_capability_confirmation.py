@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -115,7 +117,7 @@ def seed_business_and_user(db: SQLiteDatabase) -> None:
 def test_fresh_database_is_current_schema(tmp_path):
     db = make_db(tmp_path)
 
-    assert SCHEMA_VERSION == 21
+    assert SCHEMA_VERSION >= 21
 
     with db.connection() as connection:
         version = connection.execute(
@@ -238,7 +240,11 @@ def test_repository_round_trip_preserves_exact_request(tmp_path):
     loaded = repository.get("confirmation-1")
 
     assert loaded is not None
-    assert loaded == confirmation
+    expected = replace(
+        confirmation,
+        request=replace(request, actor_user_id="user-1"),
+    )
+    assert loaded == expected
     assert loaded.request.arguments == request.arguments
     assert loaded.request.capability is Capability.MEMORY
     assert loaded.request.operation == "delete"

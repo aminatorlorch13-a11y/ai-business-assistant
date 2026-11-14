@@ -128,6 +128,35 @@ class SQLiteWhatsAppRepository:
             active=bool(row["active"]),
         )
 
+    def get_binding_by_id(self, binding_id: str) -> WhatsAppBinding | None:
+        if not isinstance(binding_id, str) or not binding_id.strip():
+            raise ValueError("binding_id must be non-empty.")
+
+        with self._database.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT binding_id, provider, provider_account_id,
+                       sender_id_hash, user_id, business_id, role, active
+                FROM whatsapp_bindings
+                WHERE binding_id = ?
+                """,
+                (binding_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return WhatsAppBinding(
+            binding_id=row["binding_id"],
+            provider=row["provider"],
+            provider_account_id=row["provider_account_id"],
+            sender_id_hash=row["sender_id_hash"],
+            user_id=row["user_id"],
+            business_id=row["business_id"],
+            role=UserRole(row["role"]),
+            active=bool(row["active"]),
+        )
+
     def deactivate_binding(self, binding_id: str) -> bool:
         if not isinstance(binding_id, str) or not binding_id.strip():
             raise ValueError("binding_id must be non-empty.")

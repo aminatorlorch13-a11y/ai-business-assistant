@@ -21,7 +21,6 @@ from app.persistence.user_repository import SQLiteUserRepository
 class FounderBusinessView:
     business_id: str
     name: str
-    owner: dict | None
     assistant: dict
     user_count: int
     commercial: dict
@@ -91,28 +90,19 @@ class FounderOperationsService:
         limit: int = MAX_EVENTS,
     ) -> list[dict]:
         limit = self._validate_limit(limit, self.MAX_EVENTS)
-
         if business_id is not None:
-            events = self._events.list_for_business(
-                business_id,
-                limit=limit,
-            )
+            events = self._events.list_for_business(business_id, limit=limit)
         else:
             events = self._events.list_recent(limit=limit)
-
         return [
             {
-                "event_id": event.event_id,
                 "occurred_at": event.occurred_at.isoformat(),
                 "event_type": event.event_type,
                 "business_id": event.business_id,
-                "user_id": event.user_id,
                 "channel": event.channel.value,
                 "actor_type": event.actor_type.value,
                 "action": event.action,
                 "outcome": event.outcome.value,
-                "correlation_id": event.correlation_id,
-                "metadata": dict(event.metadata),
             }
             for event in events
         ]
@@ -121,23 +111,6 @@ class FounderOperationsService:
         memberships = self._memberships.list_for_business(
             business.business_id
         )
-
-        owner = None
-
-        for membership in memberships:
-            if membership.role.value != "owner":
-                continue
-
-            user = self._users.get(membership.user_id)
-
-            if user is not None:
-                owner = {
-                    "user_id": user.user_id,
-                    "display_name": user.display_name,
-                    "email": user.email,
-                }
-
-            break
 
         state = self._states.get(business.business_id)
         trial = self._trials.get(business.business_id)
@@ -163,7 +136,6 @@ class FounderOperationsService:
         return FounderBusinessView(
             business_id=business.business_id,
             name=business.name,
-            owner=owner,
             assistant={
                 "name": business.assistant_name,
                 "voice": business.assistant_voice,
@@ -201,7 +173,6 @@ class FounderOperationsService:
     def _purchase_summary(record) -> dict:
         return {
             "provider": record.provider,
-            "provider_event_id": record.provider_event_id,
             "amount": str(record.purchase.amount),
             "currency": record.purchase.currency,
             "paid_at": record.purchase.paid_at.isoformat(),

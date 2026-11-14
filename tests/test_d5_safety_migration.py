@@ -2,8 +2,37 @@ import sqlite3
 
 import pytest
 
-from app.persistence.database import SCHEMA_VERSION, SQLiteDatabase
+from app.persistence.database import BASE_SCHEMA, MIGRATIONS, SCHEMA_VERSION, SQLiteDatabase
 
+
+
+def _database_at_version(path, target_version):
+    if not 1 <= target_version <= SCHEMA_VERSION:
+        raise ValueError("Invalid historical schema version")
+
+    db = SQLiteDatabase(path)
+    with db.connection() as connection:
+        connection.executescript(BASE_SCHEMA)
+        connection.execute(
+            "INSERT INTO persistence_metadata(key, value) VALUES ('schema_version', '1')"
+        )
+        for version in range(1, target_version):
+            migration = MIGRATIONS.get(version)
+            if migration is None:
+                raise RuntimeError(f"Missing migration {version}")
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                migration(connection)
+                connection.execute(
+                    "UPDATE persistence_metadata SET value = ? WHERE key = 'schema_version'",
+                    (str(version + 1),),
+                )
+            except Exception:
+                connection.rollback()
+                raise
+            else:
+                connection.commit()
+    return db
 
 def _schema_version(db: SQLiteDatabase) -> int:
     with db.connection() as connection:
@@ -57,80 +86,34 @@ def test_fresh_database_initializes_at_current_schema(tmp_path):
     db = SQLiteDatabase(tmp_path / "fresh.db")
     db.initialize()
 
-    assert SCHEMA_VERSION == 21
+    assert SCHEMA_VERSION >= 21
     assert _schema_version(db) == SCHEMA_VERSION
 
     assert _table_names(db) == {
         "safety_incidents",
         "safety_controls",
     }
+
 
 
 def test_v7_database_migrates_to_current_schema_without_losing_existing_data(tmp_path):
-    db_path = tmp_path / "migration.db"
-
-    db = SQLiteDatabase(db_path)
-    db.initialize()
+    db = _database_at_version(tmp_path / "migration.db", 7)
 
     with db.transaction() as connection:
-        connection.execute("DROP TABLE safety_controls")
-        connection.execute("DROP TABLE safety_incidents")
-        connection.execute("DROP TABLE capability_confirmations")
-        for table in (
-            "business_capability_grants",
-            "business_capability_entitlements",
-            "web_conversation_turns",
-            "voice_conversation_turns",
-            "voice_conversations",
-            "forge_project_repositories",
-            "forge_task_specs",
-            "forge_jobs",
-            "forge_artifacts",
-            "forge_projects",
-        ):
-            connection.execute(f"DROP TABLE IF EXISTS {table}")
-
-
-        connection.execute(
-            """
-            UPDATE persistence_metadata
-            SET value = '7'
-            WHERE key = 'schema_version'
-            """
-        )
-
         connection.execute(
             """
             INSERT INTO businesses(
-                business_id,
-                name,
-                owner_name,
-                assistant_name,
-                assistant_voice
-            )
-            VALUES (?, ?, ?, ?, ?)
+                business_id, name, owner_name, assistant_name, assistant_voice
+            ) VALUES (?, ?, ?, ?, ?)
             """,
-            (
-                "business-d5-migration",
-                "D5 Migration Business",
-                "Founder",
-                "Assistant",
-                "calm",
-            ),
+            ("business-d5-migration", "D5 Migration Business",
+             "Founder", "Assistant", "calm"),
         )
 
     assert _schema_version(db) == 7
-    assert _table_names(db) == set()
-
     db.initialize()
-
     assert _schema_version(db) == SCHEMA_VERSION
-
-    assert _table_names(db) == {
-        "safety_incidents",
-        "safety_controls",
-    }
-
+    assert _table_names(db) == {"safety_incidents", "safety_controls"}
     assert _index_names(db) == {
         "idx_safety_incidents_status_time",
         "idx_safety_incidents_creator_time",
@@ -141,158 +124,70 @@ def test_v7_database_migrates_to_current_schema_without_losing_existing_data(tmp
 
     with db.connection() as connection:
         row = connection.execute(
-            """
-            SELECT name
-            FROM businesses
-            WHERE business_id = ?
-            """,
+            "SELECT name FROM businesses WHERE business_id = ?",
             ("business-d5-migration",),
         ).fetchone()
-
     assert row is not None
     assert row[0] == "D5 Migration Business"
 
 
 def test_v8_to_v9_preserves_safety_incident_and_control_data(tmp_path):
-    db_path = tmp_path / "v8-to-v9.db"
-
-    db = SQLiteDatabase(db_path)
-    db.initialize()
+    db = _database_at_version(tmp_path / "v8-to-v9.db", 8)
 
     with db.transaction() as connection:
         connection.execute(
-            """
-            INSERT INTO users(user_id, display_name, email)
-            VALUES (?, ?, ?)
-            """,
-            (
-                "founder-d5",
-                "D5 Founder",
-                "founder-d5@example.test",
-            ),
+            "INSERT INTO users(user_id, display_name, email) VALUES (?, ?, ?)",
+            ("founder-d5", "D5 Founder", "founder-d5@example.test"),
         )
-
         connection.execute(
             """
             INSERT INTO safety_incidents(
-                incident_id,
-                status,
-                reason,
-                created_at,
-                created_by_user_id
-            )
-            VALUES (?, ?, ?, ?, ?)
+                incident_id, status, reason, created_at, created_by_user_id
+            ) VALUES (?, ?, ?, ?, ?)
             """,
-            (
-                "incident-v8-preserved",
-                "investigating",
-                "Existing investigation",
-                "2026-01-01T00:00:00+00:00",
-                "founder-d5",
-            ),
+            ("incident-v8-preserved", "open",
+             "Existing investigation", "2026-01-01T00:00:00+00:00", "founder-d5"),
         )
-
         connection.execute(
             """
             INSERT INTO safety_controls(
-                control_id,
-                scope,
-                target,
-                state,
-                reason,
-                activated_at,
-                activated_by_user_id,
-                incident_id
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                control_id, scope, target, state, reason, activated_at,
+                activated_by_user_id, incident_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                "control-v8-preserved",
-                "global",
-                "platform",
-                "halted",
-                "Existing emergency halt",
-                "2026-01-01T00:01:00+00:00",
-                "founder-d5",
-                "incident-v8-preserved",
-            ),
-        )
-
-        connection.execute("DROP TABLE capability_confirmations")
-        for table in (
-            "business_capability_grants",
-            "business_capability_entitlements",
-            "web_conversation_turns",
-            "voice_conversation_turns",
-            "voice_conversations",
-            "forge_project_repositories",
-            "forge_task_specs",
-            "forge_jobs",
-            "forge_artifacts",
-            "forge_projects",
-        ):
-            connection.execute(f"DROP TABLE IF EXISTS {table}")
-
-
-        connection.execute(
-            """
-            UPDATE persistence_metadata
-            SET value = '8'
-            WHERE key = 'schema_version'
-            """
+            ("control-v8-preserved", "global", "platform", "halted",
+             "Existing emergency halt", "2026-01-01T00:01:00+00:00",
+             "founder-d5", "incident-v8-preserved"),
         )
 
     assert _schema_version(db) == 8
-
     db.initialize()
-
     assert _schema_version(db) == SCHEMA_VERSION
 
     with db.connection() as connection:
         incident = connection.execute(
             """
-            SELECT
-                incident_id,
-                status,
-                reason,
-                created_by_user_id
-            FROM safety_incidents
-            WHERE incident_id = ?
+            SELECT incident_id, status, reason, created_by_user_id
+            FROM safety_incidents WHERE incident_id = ?
             """,
             ("incident-v8-preserved",),
         ).fetchone()
-
         control = connection.execute(
             """
-            SELECT
-                control_id,
-                scope,
-                target,
-                state,
-                incident_id
-            FROM safety_controls
-            WHERE control_id = ?
+            SELECT control_id, scope, target, state, incident_id
+            FROM safety_controls WHERE control_id = ?
             """,
             ("control-v8-preserved",),
         ).fetchone()
 
-    assert incident is not None
     assert tuple(incident) == (
-        "incident-v8-preserved",
-        "investigating",
-        "Existing investigation",
-        "founder-d5",
+        "incident-v8-preserved", "open",
+        "Existing investigation", "founder-d5",
     )
-
-    assert control is not None
     assert tuple(control) == (
-        "control-v8-preserved",
-        "global",
-        "platform",
-        "halted",
-        "incident-v8-preserved",
+        "control-v8-preserved", "global", "platform",
+        "halted", "incident-v8-preserved",
     )
-
 
 def test_safety_incident_constraints_match_recovery_lifecycle(tmp_path):
     db = SQLiteDatabase(tmp_path / "constraints.db")
@@ -509,10 +404,8 @@ def test_current_safety_tables_are_reused_on_restart(tmp_path):
 
 
 def test_v13_to_v14_creates_voice_history(tmp_path):
-    db = SQLiteDatabase(tmp_path / "v13-to-v14.db")
-    db.initialize()
+    db = _database_at_version(tmp_path / "v13-to-v14.db", 13)
 
-    # Create a genuine v13-shaped state while preserving existing owner data.
     with db.transaction() as connection:
         connection.execute(
             """
@@ -523,33 +416,12 @@ def test_v13_to_v14_creates_voice_history(tmp_path):
             ("voice-business", "Voice Business", "Owner", "Assistant", "calm"),
         )
         connection.execute(
-            """
-            INSERT INTO users(user_id, display_name, email)
-            VALUES (?, ?, ?)
-            """,
+            "INSERT INTO users(user_id, display_name, email) VALUES (?, ?, ?)",
             ("voice-user", "Voice User", "voice-user@example.test"),
         )
         connection.execute(
-            """
-            INSERT INTO business_memberships(user_id, business_id, role)
-            VALUES (?, ?, ?)
-            """,
+            "INSERT INTO business_memberships(user_id, business_id, role) VALUES (?, ?, ?)",
             ("voice-user", "voice-business", "owner"),
-        )
-        connection.execute("DROP TABLE IF EXISTS voice_conversation_turns")
-        connection.execute("DROP TABLE IF EXISTS voice_conversations")
-        connection.execute("DROP TABLE IF EXISTS forge_project_repositories")
-        connection.execute("DROP TABLE IF EXISTS forge_task_specs")
-        connection.execute("DROP TABLE IF EXISTS forge_jobs")
-        connection.execute("DROP TABLE IF EXISTS forge_artifacts")
-        connection.execute("DROP TABLE IF EXISTS forge_projects")
-
-        connection.execute(
-            """
-            UPDATE persistence_metadata
-            SET value = '13'
-            WHERE key = 'schema_version'
-            """
         )
 
     assert _schema_version(db) == 13

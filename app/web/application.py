@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from flask import current_app
 import atexit
 import threading
 
@@ -43,6 +45,11 @@ from app.persistence.credential_repository import SQLiteCredentialRepository
 from app.persistence.database import SQLiteDatabase
 from app.persistence.web_conversation import SQLiteWebConversationRepository
 from app.persistence.membership_repository import SQLiteMembershipRepository
+from app.owner.repository import SQLiteOwnerLifestyleRepository
+from app.owner.attention_events import SQLiteAttentionEventRepository
+from app.owner.service import OwnerLifestyleService
+from app.owner.attention_service import OwnerAttentionService
+
 from app.persistence.session import SQLiteSessionRepository
 from app.persistence.user_repository import SQLiteUserRepository
 from app.auth.rate_limit import SQLiteAuthenticationRateLimiter
@@ -59,6 +66,25 @@ from app.safety.service import SafetyControlError, SafetyControlService
 from app.web.access import BusinessAccessDenied, BusinessAccessService
 from app.web.auth import SESSION_COOKIE, clear_session_cookie, install_auth_hooks, issue_csrf_cookie, login_required, require_csrf, set_session_cookie
 from app.web.security import WebSecurityError
+from app.integrations.security import FernetSecretCipher
+from app.integrations.service import IntegrationService
+from app.persistence.integration_repository import SQLiteIntegrationRepository
+from app.persistence.subscription_repository import SQLiteSubscriptionRepository
+from app.persistence.communication_repository import SQLiteCommunicationRepository
+from app.owner.communication_service import OwnerCommunicationService
+from app.owner.communication_worker import CommunicationDeliveryWorker
+from app.whatsapp.provisioning_verifier import MetaWhatsAppIdentityProvisioningVerifier
+from app.web.google_oauth import create_google_oauth_blueprint
+from app.web.meta_whatsapp_signup import create_meta_whatsapp_signup_blueprint
+from app.whatsapp.config import MetaWhatsAppConfig
+from app.whatsapp.meta_cloud_provider import MetaWhatsAppCloudProvider
+from app.whatsapp.identity import WhatsAppIdentityResolver
+from app.whatsapp.binding_service import WhatsAppBindingService
+from app.whatsapp.service import WhatsAppChannelService
+from app.whatsapp.webhook import create_meta_whatsapp_blueprint
+from app.persistence.whatsapp import SQLiteWhatsAppRepository
+from app.persistence.whatsapp_conversation import SQLiteWhatsAppConversationRepository
+
 
 
 class OrchestratorLike(Protocol):
@@ -86,6 +112,8 @@ def create_app(
     runtime_builder: RuntimeBuilder | None = None,
     speech_synthesizer: SpeechSynthesizer | None = None,
     testing: bool = False,
+    endpoint_verifier=None,
+    identity_verifier=None,
 ) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config.update(TESTING=testing, MAX_CONTENT_LENGTH=64 * 1024, JSON_SORT_KEYS=False)
@@ -97,6 +125,14 @@ def create_app(
     users = SQLiteUserRepository(db)
     credentials = SQLiteCredentialRepository(db)
     memberships = SQLiteMembershipRepository(db)
+    owner_lifestyle_repository = SQLiteOwnerLifestyleRepository(db)
+    owner_lifestyle_service = OwnerLifestyleService(
+        owner_lifestyle_repository, memberships
+    )
+    attention_event_repository = SQLiteAttentionEventRepository(db)
+    owner_attention_service = OwnerAttentionService(
+        owner_lifestyle_service, attention_event_repository
+    )
     sessions = SQLiteSessionRepository(db)
     founders = SQLiteFounderRepository(db)
 
@@ -110,7 +146,69 @@ def create_app(
     )
 
     businesses = SQLiteBusinessRepository(db)
+    subscriptions = SQLiteSubscriptionRepository(db)
+    app.extensions['assistant_subscription_repository'] = subscriptions
     access = BusinessAccessService(db)
+
+    # WhatsApp remains disabled until every real Meta credential is configured.
+    whatsapp_config = MetaWhatsAppConfig.from_environment()
+    if whatsapp_config is not None:
+        whatsapp_repository = SQLiteWhatsAppRepository(db)
+        def authorize_whatsapp_binding(user_id, business_id):
+            membership = memberships.get(user_id, business_id)
+            if membership is None:
+                return None
+            return membership.role
+
+        whatsapp_binding_service = WhatsAppBindingService(
+            repository=whatsapp_repository,
+            sender_hash_secret=whatsapp_config.sender_hash_secret,
+            authorize_business_admin=authorize_whatsapp_binding,
+            # Deliberately unset until tenant-specific Meta ownership
+            # verification is implemented. Registration fails closed.
+            verify_provider_account=None,
+        )
+        app.extensions["assistant_whatsapp_binding_service"] = (
+            whatsapp_binding_service
+        )
+        whatsapp_conversations = SQLiteWhatsAppConversationRepository(db)
+        whatsapp_identity = WhatsAppIdentityResolver(
+            repository=whatsapp_repository,
+            membership_repository=memberships,
+            sender_hash_secret=whatsapp_config.sender_hash_secret,
+        )
+        whatsapp_provider = MetaWhatsAppCloudProvider(
+            access_token=whatsapp_config.access_token,
+            graph_api_version=whatsapp_config.graph_api_version,
+        )
+
+        def whatsapp_orchestrator_factory(tenant):
+            business = businesses.get(tenant.business_id)
+            if business is None:
+                raise LookupError("The WhatsApp business no longer exists.")
+
+            if runtime_builder is not None:
+                return runtime_builder(business)
+
+            return _production_runtime_builder(business, database=db)
+
+        whatsapp_service = WhatsAppChannelService(
+            repository=whatsapp_repository,
+            identity_resolver=whatsapp_identity,
+            business_access=access,
+            orchestrator_factory=whatsapp_orchestrator_factory,
+            provider=whatsapp_provider,
+            conversation_repository=whatsapp_conversations,
+            sender_hash_secret=whatsapp_config.sender_hash_secret,
+        )
+
+        app.register_blueprint(
+            create_meta_whatsapp_blueprint(
+                service=whatsapp_service,
+                config=whatsapp_config,
+            )
+        )
+
     founder_access = FounderAuthorizationService(founders)
     founder_operations = FounderOperationsService(db)
     founder_analytics = FounderAnalyticsService(db)
@@ -131,6 +229,81 @@ def create_app(
     builder = runtime_builder or _production_runtime_builder
 
     install_auth_hooks(app, auth_service)
+
+    integration_service = None
+    try:
+        integration_cipher = FernetSecretCipher.from_environment()
+        integration_service = IntegrationService(
+            SQLiteIntegrationRepository(db),
+            integration_cipher,
+        )
+    except (RuntimeError, ValueError):
+        # Keep the main application available; integration routes fail closed.
+        integration_service = None
+
+    communication_repository = SQLiteCommunicationRepository(db)
+    if whatsapp_config is not None and identity_verifier is None:
+        identity_verifier = MetaWhatsAppIdentityProvisioningVerifier(
+            access_token=whatsapp_config.access_token,
+            graph_api_version=whatsapp_config.graph_api_version,
+        )
+
+    communication_service = None
+    configured_whatsapp_provider = locals().get("whatsapp_provider")
+    can_use_whatsapp_verification = (
+        whatsapp_config is not None and configured_whatsapp_provider is not None
+    )
+    has_legacy_verification = (
+        endpoint_verifier is not None and identity_verifier is not None
+    )
+
+    if can_use_whatsapp_verification or has_legacy_verification:
+        communication_cipher = FernetSecretCipher.from_environment()
+        communication_service = OwnerCommunicationService(
+            repository=communication_repository,
+            cipher=communication_cipher,
+            lifestyle_service=owner_lifestyle_service,
+            endpoint_verifier=endpoint_verifier,
+            identity_verifier=identity_verifier,
+            whatsapp_provider=configured_whatsapp_provider,
+            sender_hash_secret=(
+                whatsapp_config.sender_hash_secret
+                if whatsapp_config is not None else None
+            ),
+        )
+
+    app.extensions["assistant_communication"] = communication_service
+
+    communication_worker = None
+    configured_whatsapp_provider = locals().get("whatsapp_provider")
+
+    if communication_service is not None and configured_whatsapp_provider is not None:
+        communication_worker = CommunicationDeliveryWorker(
+            repository=communication_repository,
+            communication_service=communication_service,
+            provider=configured_whatsapp_provider,
+        )
+        communication_worker.start()
+        atexit.register(communication_worker.stop)
+
+    app.extensions["assistant_communication_worker"] = communication_worker
+    app.extensions["assistant_communication_repository"] = communication_repository
+
+    app.extensions["assistant_integrations"] = integration_service
+    app.register_blueprint(create_google_oauth_blueprint(
+        integration_service=integration_service,
+        memberships=memberships,
+        client_id=os.getenv("GOOGLE_CLIENT_ID"),
+        client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+        redirect_uri=os.getenv("GOOGLE_GMAIL_REDIRECT_URI"),
+    ))
+    app.register_blueprint(create_meta_whatsapp_signup_blueprint(
+        integration_service=integration_service,
+        memberships=memberships,
+    ))
+    app.extensions["assistant_owner_lifestyle"] = owner_lifestyle_service
+    app.extensions["assistant_owner_attention"] = owner_attention_service
+    app.extensions["assistant_attention_events"] = attention_event_repository
     app.extensions["assistant_database"] = db
     app.extensions["assistant_web_conversations"] = web_conversations
     app.extensions["assistant_businesses"] = businesses
@@ -175,6 +348,7 @@ def create_app(
         composition = app.extensions.get("assistant_capability_composition")
         if composition is None:
             composition = build_production_capability_composition(
+        integration_service=current_app.extensions.get("assistant_integrations"),
                 database=app.extensions["assistant_database"],
             )
             app.extensions["assistant_capability_composition"] = composition
@@ -798,6 +972,238 @@ def create_app(
             auth_service.logout(token)
         return clear_session_cookie(jsonify({"message": "Signed out."}))
 
+
+    def require_owner_lifestyle_access():
+        if g.principal.role != UserRole.OWNER:
+            return jsonify({"error": "Only the business owner may access lifestyle settings."}), 403
+        return None
+
+    @app.post("/api/owner/communication/whatsapp/verify")
+    @login_required
+    def owner_whatsapp_verify():
+        require_csrf(request)
+        denied = require_owner_lifestyle_access()
+        if denied:
+            return denied
+
+        service = app.extensions.get("assistant_communication")
+        if service is None:
+            return jsonify({"error": "WhatsApp verification is not configured."}), 503
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "A JSON request body is required."}), 400
+
+        endpoint = data.get("endpoint")
+        consent = data.get("consent_granted")
+        if not isinstance(endpoint, str) or type(consent) is not bool:
+            return jsonify({"error": "A phone number and explicit consent are required."}), 400
+        if consent is not True:
+            return jsonify({"error": "Explicit consent is required."}), 403
+
+        try:
+            result = service.begin_whatsapp_endpoint_verification(
+                g.principal,
+                g.principal.business_id,
+                endpoint=endpoint,
+                consent_granted=consent,
+            )
+            return jsonify(result), 202
+        except PermissionError as exc:
+            return jsonify({"error": str(exc)}), 403
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError:
+            return jsonify({"error": "WhatsApp verification could not be started."}), 503
+
+    @app.get("/api/owner/lifestyle")
+    @login_required
+    def owner_lifestyle_get():
+        denied = require_owner_lifestyle_access()
+        if denied:
+            return denied
+        try:
+            from dataclasses import asdict
+            preferences = owner_lifestyle_service.get_preferences(
+                g.principal, g.principal.business_id
+            )
+            return jsonify(asdict(preferences))
+        except PermissionError:
+            return jsonify({"error": "Owner access denied."}), 403
+
+    @app.put("/api/owner/lifestyle")
+    @login_required
+    def owner_lifestyle_update():
+        require_csrf(request)
+        denied = require_owner_lifestyle_access()
+        if denied:
+            return denied
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or not isinstance(data.get("changes"), dict):
+            return jsonify({"error": "Expected a JSON object containing changes."}), 400
+        try:
+            from dataclasses import asdict
+            preferences = owner_lifestyle_service.update_preferences(
+                g.principal, g.principal.business_id, data["changes"]
+            )
+            return jsonify(asdict(preferences))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except PermissionError:
+            return jsonify({"error": "Owner access denied."}), 403
+
+    @app.post("/api/owner/attention/events")
+    @login_required
+    def owner_attention_ingest():
+        require_csrf(request)
+        denied = require_owner_lifestyle_access()
+        if denied:
+            return denied
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Expected a JSON object."}), 400
+
+        allowed_fields = {
+            "idempotency_key", "event_type", "severity",
+            "title", "details", "payload",
+        }
+        if set(data) - allowed_fields:
+            return jsonify({"error": "Unsupported event fields."}), 400
+
+        required_fields = (
+            "idempotency_key", "event_type", "severity", "title",
+        )
+        if any(field not in data for field in required_fields):
+            return jsonify({"error": "Missing required event fields."}), 400
+
+        try:
+            from dataclasses import asdict
+
+            event = owner_attention_service.ingest(
+                g.principal,
+                g.principal.business_id,
+                idempotency_key=data["idempotency_key"],
+                event_type=data["event_type"],
+                severity=data["severity"],
+                title=data["title"],
+                details=data.get("details", ""),
+                payload=data.get("payload"),
+            )
+            return jsonify(asdict(event)), 201
+
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except PermissionError:
+            return jsonify({"error": "Owner access denied."}), 403
+
+
+    @app.get("/api/owner/lifestyle/suggestions")
+    @login_required
+    def owner_lifestyle_suggestions():
+        denied = require_owner_lifestyle_access()
+        if denied:
+            return denied
+        try:
+            from dataclasses import asdict
+            suggestions = owner_lifestyle_service.list_pending_suggestions(
+                g.principal, g.principal.business_id
+            )
+            return jsonify({"suggestions": [asdict(item) for item in suggestions]})
+        except PermissionError:
+            return jsonify({"error": "Owner access denied."}), 403
+
+    @app.post("/api/owner/lifestyle/observations")
+    @login_required
+    def owner_lifestyle_observe():
+        require_csrf(request)
+        denied = require_owner_lifestyle_access()
+        if denied:
+            return denied
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Expected a JSON object."}), 400
+        try:
+            from dataclasses import asdict
+            suggestion = owner_lifestyle_service.observe_routine(
+                g.principal,
+                g.principal.business_id,
+                data.get("field_name"),
+                data.get("proposed_value"),
+            )
+            return jsonify(asdict(suggestion)), 201
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except PermissionError:
+            return jsonify({"error": "Owner access denied."}), 403
+
+    @app.post("/api/owner/lifestyle/suggestions/<suggestion_id>/resolve")
+    @login_required
+    def owner_lifestyle_resolve(suggestion_id):
+        require_csrf(request)
+        denied = require_owner_lifestyle_access()
+        if denied:
+            return denied
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or type(data.get("accept")) is not bool:
+            return jsonify({"error": "The accept field must be true or false."}), 400
+        try:
+            from dataclasses import asdict
+            preferences = owner_lifestyle_service.resolve_suggestion(
+                g.principal,
+                g.principal.business_id,
+                suggestion_id,
+                data["accept"],
+            )
+            return jsonify(asdict(preferences))
+        except LookupError:
+            return jsonify({"error": "Suggestion not found."}), 404
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except PermissionError:
+            return jsonify({"error": "Owner access denied."}), 403
+
+    @app.post("/api/owner/subscriptions/<subscription_id>/cancel")
+    @login_required
+    def owner_cancel_subscription(subscription_id: str):
+        require_csrf(request)
+
+        if g.principal.role != UserRole.OWNER:
+            return jsonify({"error": "Only the business owner may cancel a subscription."}), 403
+
+        subscription = subscriptions.get_subscription(subscription_id)
+
+        # Do not reveal whether another business owns this subscription.
+        if (
+            subscription is None
+            or subscription["business_id"] != g.principal.business_id
+        ):
+            return jsonify({"error": "Subscription not found."}), 404
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or type(data.get("at_period_end")) is not bool:
+            return jsonify({
+                "error": "Provide at_period_end as true or false."
+            }), 400
+
+        try:
+            changed = subscriptions.cancel_subscription(
+                subscription_id=subscription_id,
+                cancelled_at=datetime.now(timezone.utc),
+                at_period_end=data["at_period_end"],
+            )
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        return jsonify({
+            "subscription_id": subscription_id,
+            "cancellation_requested": True,
+            "changed": changed,
+            "at_period_end": data["at_period_end"],
+            "provider_cancellation_performed": False,
+            "business_access_changed": False,
+        }), 200
+
     @app.get("/api/me")
     @login_required
     def me_api():
@@ -891,11 +1297,28 @@ def create_app(
                     config = ElevenLabsConfig.from_environment()
                     synthesizer = ElevenLabsSpeechEngine(config)
 
+                direction = result.speech_direction
+
                 audio = synthesizer.synthesize(
                     SpeechRequest(
                         text=result.message,
                         voice=business.assistant_voice,
-                        speed=0.90 if business.assistant_voice == "female" else 1.0,
+                        speed=1.0,
+                        emotion=(
+                            direction.emotion
+                            if direction is not None
+                            else "neutral"
+                        ),
+                        delivery=(
+                            direction.delivery
+                            if direction is not None
+                            else "normal"
+                        ),
+                        pitch=(
+                            direction.pitch
+                            if direction is not None
+                            else None
+                        ),
                     )
                 )
 
@@ -951,7 +1374,11 @@ def _ensure_process_forge_worker(
         atexit.register(_forge_runner.stop)
 
 
-def _production_runtime_builder(business: Business) -> OrchestratorLike:
+def _production_runtime_builder(
+    business: Business,
+    *,
+    database: SQLiteDatabase | None = None,
+) -> OrchestratorLike:
     """Build the structured production assistant runtime for one business.
 
     This is the web composition root for E1.5e-3.
@@ -964,7 +1391,7 @@ def _production_runtime_builder(business: Business) -> OrchestratorLike:
     if not isinstance(business, Business):
         raise TypeError("business must be a Business.")
 
-    database = _production_database()
+    database = database or _production_database()
 
     try:
         config = GroqConfig.from_environment()

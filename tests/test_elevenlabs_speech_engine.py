@@ -59,8 +59,7 @@ def test_synthesize_returns_real_audio_bytes(monkeypatch):
     assert captured["headers"]["Xi-api-key"] == "test-secret"
     assert captured["payload"] == {
         "text": "Hello Amination",
-        "model_id": "eleven_flash_v2_5",
-        "voice_settings": {"speed": 1.0},
+        "model_id": "eleven_v4_turbo",
     }
     assert captured["timeout"] == 30.0
 
@@ -157,3 +156,74 @@ def test_environment_configuration_loads_without_exposing_secrets(monkeypatch):
     assert config.female_voice_id == "female-id"
     assert config.timeout_seconds == 45.0
     assert config.model_id == "eleven_flash_v2_5"
+
+
+def test_expressive_vocalizations_are_rendered_as_eleven_v4_audio_tags():
+    from app.voice.request import SpeechRequest, VocalizationEvent
+
+    config = ElevenLabsConfig(
+        api_key="test-key",
+        male_voice_id="male-id",
+        female_voice_id="female-id",
+        model_id="eleven_v4",
+    )
+    engine = ElevenLabsSpeechEngine(config)
+
+    request = SpeechRequest(
+        text="That was unexpected. I am glad you are here.",
+        voice="female",
+        emotion="excited",
+        delivery="whisper",
+        vocalizations=(
+            VocalizationEvent("chuckle", 0),
+            VocalizationEvent("sigh", 21),
+        ),
+    )
+
+    rendered = engine._prepare_expressive_text(request)
+
+    assert rendered.startswith("[excited] [whispers]")
+    assert "[chuckles]" in rendered
+    assert "[sighs]" in rendered
+    assert "That was unexpected." in rendered
+    assert "I am glad you are here." in rendered
+
+
+def test_flash_model_rejects_vocalization_tags_instead_of_speaking_them():
+    from app.voice.request import SpeechRequest, VocalizationEvent
+
+    config = ElevenLabsConfig(
+        api_key="test-key",
+        male_voice_id="male-id",
+        female_voice_id="female-id",
+        model_id="eleven_flash_v2_5",
+    )
+    engine = ElevenLabsSpeechEngine(config)
+
+    request = SpeechRequest(
+        text="Hello.",
+        voice="female",
+        vocalizations=(VocalizationEvent("laugh", 0),),
+    )
+
+    with pytest.raises(ValueError, match="does not support expressive audio tags"):
+        engine._prepare_expressive_text(request)
+
+
+def test_neutral_flash_request_keeps_original_text():
+    from app.voice.request import SpeechRequest
+
+    config = ElevenLabsConfig(
+        api_key="test-key",
+        male_voice_id="male-id",
+        female_voice_id="female-id",
+        model_id="eleven_flash_v2_5",
+    )
+    engine = ElevenLabsSpeechEngine(config)
+
+    request = SpeechRequest(
+        text="Hello, how are you?",
+        voice="female",
+    )
+
+    assert engine._prepare_expressive_text(request) == "Hello, how are you?"

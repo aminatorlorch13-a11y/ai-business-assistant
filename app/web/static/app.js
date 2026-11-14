@@ -611,15 +611,9 @@ function renderFounderEvents(items){
             `${founderValue(item.occurred_at)} · `+
             `${founderValue(item.channel)} · `+
             `${founderValue(item.action)}`;
-
-        const evidence=document.createElement('code');
-        evidence.textContent=JSON.stringify(item,null,2);
-
-        article.appendChild(heading);
+article.appendChild(heading);
         article.appendChild(details);
-        article.appendChild(evidence);
-
-        box.appendChild(article);
+box.appendChild(article);
     }
 }
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -132,7 +134,7 @@ def test_create_persists_exact_trusted_binding_and_request(tmp_path):
     assert stored.user_id == "user-1"
     assert stored.business_id == "business-1"
     assert stored.role is UserRole.ADMIN
-    assert stored.request == request
+    assert stored.request == replace(request, actor_user_id=tenant.principal.user_id)
     assert stored.created_at == now
     assert stored.expires_at == now + CAPABILITY_CONFIRMATION_TTL
     assert stored.consumed_at is None
@@ -358,9 +360,9 @@ def test_consume_requires_exact_session_user_business_role_and_channel_binding(
     )
 
     assert consumed is not None
-    assert consumed.request == _request(
-        channel="web",
-        integration="internal",
+    assert consumed.request == replace(
+        _request(channel="web", integration="internal"),
+        actor_user_id=tenant.principal.user_id,
     )
     assert consumed.consumed_at is not None
     assert consumed.revoked_at is None

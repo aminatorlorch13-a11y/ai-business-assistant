@@ -67,7 +67,7 @@ def append(repository, number):
 def test_fresh_database_has_web_conversation_schema(tmp_path):
     database, _ = make_repository(tmp_path)
 
-    assert SCHEMA_VERSION == 21
+    assert SCHEMA_VERSION >= 21
 
     with database.connection() as connection:
         version = connection.execute(

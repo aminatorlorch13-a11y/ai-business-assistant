@@ -9,6 +9,7 @@ import threading
 from app.forge.job import ForgeJob, ForgeJobStatus
 from app.forge.job_store import ForgeJobRecord, ForgeJobStore
 from app.forge.task_spec import ForgeTaskSpec
+from app.forge.sentinel_coordinator import ForgeSentinelCoordinator
 
 
 class ForgeCancellationRequested(Exception):
@@ -161,6 +162,7 @@ class ForgeWorker:
         vault: Vault,
         worker_id: str | None = None,
         lease_seconds: int = 60,
+        sentinel_coordinator: ForgeSentinelCoordinator | None = None,
     ) -> None:
         if not isinstance(job_store, ForgeJobStore):
             raise TypeError("job_store must be a ForgeJobStore.")
@@ -171,9 +173,18 @@ class ForgeWorker:
         if lease_seconds < 10:
             raise ValueError("lease_seconds must be at least 10.")
 
+        if (
+            sentinel_coordinator is not None
+            and not isinstance(sentinel_coordinator, ForgeSentinelCoordinator)
+        ):
+            raise TypeError(
+                "sentinel_coordinator must be a ForgeSentinelCoordinator or None."
+            )
+
         self._store = job_store
         self._executor = executor
         self._vault = vault
+        self._sentinel = sentinel_coordinator
         self._worker_id = worker_id or f"forge-worker-{uuid.uuid4().hex[:16]}"
         self._lease_seconds = lease_seconds
 
@@ -263,14 +274,41 @@ class ForgeWorker:
                 )
 
             context.check_cancellation()
-            context.save_checkpoint(
-                {"artifact_reference": artifact_reference.strip()}
-            )
+
+            artifact_reference = artifact_reference.strip()
+            checkpoint = {"artifact_reference": artifact_reference}
+
+            # Production composition supplies Sentinel. A missing coordinator
+            # remains possible only for isolated legacy/unit constructions;
+            # production factories must never create such a worker.
+            if self._sentinel is not None:
+                context.check_lease()
+                assessment = self._sentinel.assess(
+                    business_id=spec.business_id,
+                    project_id=spec.project_id,
+                    job_id=spec.job_id,
+                    artifact_reference=artifact_reference,
+                )
+                context.check_cancellation()
+
+                checkpoint.update({
+                    "sentinel_assessment_id": assessment["assessment_id"],
+                    "sentinel_candidate_sha256": assessment["candidate_sha256"],
+                    "sentinel_status": assessment["status"],
+                })
+
+                target_status = (
+                    ForgeJobStatus.COMPLETED_VAULTED
+                    if assessment["status"] == "ready_for_user_acceptance"
+                    else ForgeJobStatus.COMPLETED_VAULTED_LOCKED
+                )
+            else:
+                target_status = ForgeJobStatus.COMPLETED_VAULTED
+
+            context.save_checkpoint(checkpoint)
 
             now = datetime.now(timezone.utc)
-            completed = context.job.transition(
-                ForgeJobStatus.COMPLETED_VAULTED, now
-            )
+            completed = context.job.transition(target_status, now)
             return self._store.update(
                 replace(context._record, job=completed)
             )

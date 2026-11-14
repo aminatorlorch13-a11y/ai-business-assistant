@@ -28,4 +28,7 @@ class VoiceService:
             text=response.message,
             voice=configuration.voice,
             speed=configuration.speed,
+            emotion=(response.speech_direction.emotion if response.speech_direction is not None else 'neutral'),
+            delivery=(response.speech_direction.delivery if response.speech_direction is not None else 'normal'),
+            pitch=(response.speech_direction.pitch if response.speech_direction is not None else None),
         )

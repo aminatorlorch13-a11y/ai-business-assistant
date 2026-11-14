@@ -13,6 +13,10 @@ from app.forge.artifact_store import ForgeArtifactStore
 from app.forge.artifact_vault import ForgeArtifactVault
 from app.forge.worker import Executor, ForgeWorker
 from app.forge.worker_runtime import ForgeWorkerRunner
+from app.forge.sentinel_guards import ForgeSentinelAssessmentService
+from app.forge.sentinel_reviewers import build_production_sentinel_reviewers
+from app.forge.sentinel_store import ForgeSentinelStore
+from app.forge.sentinel_coordinator import ForgeSentinelCoordinator
 from app.assistant.structured_processor import StructuredAssistantProcessor
 from app.forge.brain_candidate_executor import ForgeBrainCandidateExecutor
 from app.commercial.entitlement_resolver import ExplicitEntitlementResolver
@@ -59,6 +63,7 @@ class ProductionCapabilityComposition:
         forge_project_repository_store: ForgeProjectRepositoryStore | None = None,
         forge_artifact_store: ForgeArtifactStore | None = None,
         forge_artifact_vault: ForgeArtifactVault | None = None,
+        forge_sentinel_coordinator: ForgeSentinelCoordinator | None = None,
     ) -> None:
         if not isinstance(
             entitlement_resolver,
@@ -129,6 +134,16 @@ class ProductionCapabilityComposition:
             raise TypeError('forge_artifact_vault must be a ForgeArtifactVault or None.')
         self._forge_artifact_store = forge_artifact_store
         self._forge_artifact_vault = forge_artifact_vault
+        if (
+            forge_sentinel_coordinator is not None
+            and not isinstance(
+                forge_sentinel_coordinator, ForgeSentinelCoordinator
+            )
+        ):
+            raise TypeError(
+                "forge_sentinel_coordinator must be a ForgeSentinelCoordinator or None."
+            )
+        self._forge_sentinel_coordinator = forge_sentinel_coordinator
 
     @property
     def memory_service(self) -> ScopedMemoryService:
@@ -162,8 +177,11 @@ class ProductionCapabilityComposition:
             self._forge_job_store is None
             or self._forge_artifact_store is None
             or self._forge_artifact_vault is None
+            or self._forge_sentinel_coordinator is None
         ):
-            raise RuntimeError("Forge persistence is not configured.")
+            raise RuntimeError(
+                "Forge persistence and Sentinel enforcement must be configured."
+            )
         from app.forge.terminal_service import ForgeTerminalService
 
         runner_url = os.environ.get("FORGE_RUNNER_URL", "").strip()
@@ -188,6 +206,7 @@ class ProductionCapabilityComposition:
             artifact_vault=self._forge_artifact_vault,
             workspace_root=workspace_root,
             runner_client=runner_client,
+            sentinel_coordinator=self._forge_sentinel_coordinator,
         )
 
     def create_forge_worker(
@@ -197,14 +216,21 @@ class ProductionCapabilityComposition:
         worker_id: str | None = None,
         lease_seconds: int = 60,
     ) -> ForgeWorker:
-        if self._forge_job_store is None or self._forge_artifact_vault is None:
-            raise RuntimeError('Forge persistence is not configured.')
+        if (
+            self._forge_job_store is None
+            or self._forge_artifact_vault is None
+            or self._forge_sentinel_coordinator is None
+        ):
+            raise RuntimeError(
+                "Forge persistence and Sentinel enforcement must be configured."
+            )
         return ForgeWorker(
             job_store=self._forge_job_store,
             executor=executor,
             vault=self._forge_artifact_vault,
             worker_id=worker_id,
             lease_seconds=lease_seconds,
+            sentinel_coordinator=self._forge_sentinel_coordinator,
         )
 
     def create_brain_forge_worker(
@@ -274,6 +300,7 @@ class ProductionCapabilityComposition:
 def build_production_capability_composition(
     *,
     database,
+    integration_service=None,
 ) -> ProductionCapabilityComposition:
     """
     Build the production capability stack.
@@ -302,6 +329,9 @@ def build_production_capability_composition(
                 Capability.FORGE: frozenset(
                     {"submit_job", "get_job", "list_jobs"}
                 ),
+                Capability.COMMUNICATION: frozenset(
+                    {"gmail_search", "gmail_read"}
+                ),
             },
             UserRole.ADMIN: {
                 Capability.MEMORY: frozenset(
@@ -309,6 +339,9 @@ def build_production_capability_composition(
                 ),
                 Capability.FORGE: frozenset(
                     {"submit_job", "get_job", "list_jobs"}
+                ),
+                Capability.COMMUNICATION: frozenset(
+                    {"gmail_search", "gmail_read"}
                 ),
             },
             UserRole.MEMBER: {
@@ -332,6 +365,10 @@ def build_production_capability_composition(
                 "get_job": False,
                 "list_jobs": False,
             },
+            Capability.COMMUNICATION: {
+                "gmail_search": False,
+                "gmail_read": False,
+            },
         }
     )
 
@@ -342,9 +379,22 @@ def build_production_capability_composition(
     ).expanduser()
     forge_artifact_store = ForgeArtifactStore(database, artifact_root)
     forge_artifact_vault = ForgeArtifactVault(forge_artifact_store)
+
+    # Passing Sentinel permits user acceptance only, never production release.
+    sentinel_assessment_service = ForgeSentinelAssessmentService(
+        reviewers=build_production_sentinel_reviewers()
+    )
+    forge_sentinel_store = ForgeSentinelStore(database)
+    forge_sentinel_coordinator = ForgeSentinelCoordinator(
+        artifact_store=forge_artifact_store,
+        assessment_service=sentinel_assessment_service,
+        sentinel_store=forge_sentinel_store,
+    )
+
     router = build_capability_router(
         memory_service,
         forge_job_store=forge_job_store,
+        gmail_integration_service=integration_service,
     )
 
     safety_repository = SQLiteSafetyRepository(database)
@@ -363,4 +413,5 @@ def build_production_capability_composition(
         forge_project_repository_store=forge_project_repository_store,
         forge_artifact_vault=forge_artifact_vault,
         forge_artifact_store=forge_artifact_store,
+        forge_sentinel_coordinator=forge_sentinel_coordinator,
     )

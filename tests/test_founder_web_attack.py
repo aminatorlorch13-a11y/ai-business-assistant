@@ -296,8 +296,9 @@ def test_founder_events_returns_recorded_events_only(tmp_path):
     events = response.get_json()["events"]
 
     assert len(events) == 1
-    assert events[0]["event_id"] == "event-1"
     assert events[0]["business_id"] == "business-1"
+    for forbidden in ("event_id", "user_id", "correlation_id", "metadata"):
+        assert forbidden not in events[0]
 
 
 def test_founder_events_can_filter_by_business(tmp_path):

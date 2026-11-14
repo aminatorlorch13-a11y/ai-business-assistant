@@ -5,9 +5,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
 
-SCHEMA_VERSION = 21
-
-
+SCHEMA_VERSION = 33
 class SQLiteDatabase:
     """Durable SQLite infrastructure with explicit tracked migrations."""
 
@@ -1566,6 +1564,876 @@ def _migrate_v20_to_v21(connection: sqlite3.Connection) -> None:
     )
 
 
+
+def _migrate_v21_to_v22(connection: sqlite3.Connection) -> None:
+    """Add append-only, tenant-scoped Forge Sentinel assessment records."""
+    connection.execute(
+        """
+        CREATE TABLE forge_sentinel_assessments (
+            assessment_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            artifact_ref TEXT NOT NULL
+                CHECK(length(trim(artifact_ref)) BETWEEN 1 AND 512),
+            candidate_sha256 TEXT NOT NULL
+                CHECK(length(candidate_sha256) = 64)
+                CHECK(candidate_sha256 NOT GLOB '*[^0-9a-f]*'),
+            status TEXT NOT NULL
+                CHECK(status IN ('BLOCKED', 'READY_FOR_USER_ACCEPTANCE')),
+            blocked_at_guard TEXT
+                CHECK(blocked_at_guard IS NULL OR blocked_at_guard IN (
+                    'sentinel-guard-1',
+                    'sentinel-guard-2',
+                    'sentinel-guard-3',
+                    'sentinel-guard-4',
+                    'sentinel-guard-5'
+                )),
+            created_at TEXT NOT NULL CHECK(length(trim(created_at)) > 0),
+            UNIQUE(business_id, project_id, job_id, assessment_id),
+            FOREIGN KEY(business_id, project_id, job_id)
+                REFERENCES forge_jobs(business_id, project_id, job_id)
+                ON DELETE RESTRICT,
+            CHECK(
+                (status = 'READY_FOR_USER_ACCEPTANCE' AND blocked_at_guard IS NULL)
+                OR
+                (status = 'BLOCKED' AND blocked_at_guard IS NOT NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE forge_sentinel_guard_results (
+            assessment_id TEXT NOT NULL,
+            business_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            guard_id TEXT NOT NULL CHECK(guard_id IN (
+                'sentinel-guard-1',
+                'sentinel-guard-2',
+                'sentinel-guard-3',
+                'sentinel-guard-4',
+                'sentinel-guard-5'
+            )),
+            implementation_id TEXT,
+            artifact_ref TEXT NOT NULL
+                CHECK(length(trim(artifact_ref)) BETWEEN 1 AND 512),
+            candidate_sha256 TEXT NOT NULL
+                CHECK(length(candidate_sha256) = 64)
+                CHECK(candidate_sha256 NOT GLOB '*[^0-9a-f]*'),
+            verdict TEXT NOT NULL
+                CHECK(verdict IN ('PASS', 'FAIL', 'INCONCLUSIVE')),
+            findings_json TEXT NOT NULL CHECK(json_valid(findings_json)),
+            reviewed_at TEXT NOT NULL CHECK(length(trim(reviewed_at)) > 0),
+            PRIMARY KEY(assessment_id, guard_id),
+            FOREIGN KEY(business_id, project_id, job_id, assessment_id)
+                REFERENCES forge_sentinel_assessments(
+                    business_id, project_id, job_id, assessment_id
+                )
+                ON DELETE RESTRICT
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_forge_sentinel_job_latest
+        ON forge_sentinel_assessments(
+            business_id, project_id, job_id, created_at
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_forge_sentinel_candidate
+        ON forge_sentinel_assessments(
+            business_id, project_id, job_id, candidate_sha256
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TRIGGER forge_sentinel_assessments_no_update
+        BEFORE UPDATE ON forge_sentinel_assessments
+        BEGIN
+            SELECT RAISE(ABORT, 'Sentinel assessments are immutable');
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER forge_sentinel_assessments_no_delete
+        BEFORE DELETE ON forge_sentinel_assessments
+        BEGIN
+            SELECT RAISE(ABORT, 'Sentinel assessments are immutable');
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER forge_sentinel_results_no_update
+        BEFORE UPDATE ON forge_sentinel_guard_results
+        BEGIN
+            SELECT RAISE(ABORT, 'Sentinel Guard results are immutable');
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER forge_sentinel_results_no_delete
+        BEFORE DELETE ON forge_sentinel_guard_results
+        BEGIN
+            SELECT RAISE(ABORT, 'Sentinel Guard results are immutable');
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER forge_sentinel_results_validate_insert
+        BEFORE INSERT ON forge_sentinel_guard_results
+        BEGIN
+            SELECT CASE
+                WHEN NOT EXISTS (
+                    SELECT 1
+                    FROM forge_sentinel_assessments a
+                    WHERE a.assessment_id = NEW.assessment_id
+                      AND a.business_id = NEW.business_id
+                      AND a.project_id = NEW.project_id
+                      AND a.job_id = NEW.job_id
+                      AND a.artifact_ref = NEW.artifact_ref
+                      AND a.candidate_sha256 = NEW.candidate_sha256
+                )
+                THEN RAISE(ABORT, 'Sentinel result scope or digest mismatch')
+            END;
+
+            SELECT CASE
+                WHEN NEW.guard_id != CASE (
+                    SELECT COUNT(*)
+                    FROM forge_sentinel_guard_results r
+                    WHERE r.assessment_id = NEW.assessment_id
+                )
+                    WHEN 0 THEN 'sentinel-guard-1'
+                    WHEN 1 THEN 'sentinel-guard-2'
+                    WHEN 2 THEN 'sentinel-guard-3'
+                    WHEN 3 THEN 'sentinel-guard-4'
+                    WHEN 4 THEN 'sentinel-guard-5'
+                    ELSE ''
+                END
+                THEN RAISE(ABORT, 'Sentinel Guard sequence violation')
+            END;
+
+            SELECT CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM forge_sentinel_guard_results r
+                    WHERE r.assessment_id = NEW.assessment_id
+                      AND r.verdict != 'PASS'
+                )
+                THEN RAISE(ABORT, 'Cannot advance after a non-PASS Guard')
+            END;
+
+            SELECT CASE
+                WHEN (
+                    SELECT status
+                    FROM forge_sentinel_assessments
+                    WHERE assessment_id = NEW.assessment_id
+                ) = 'READY_FOR_USER_ACCEPTANCE'
+                AND NEW.verdict != 'PASS'
+                THEN RAISE(ABORT, 'User acceptance eligibility requires PASS')
+            END;
+
+            SELECT CASE
+                WHEN (
+                    SELECT status
+                    FROM forge_sentinel_assessments
+                    WHERE assessment_id = NEW.assessment_id
+                ) = 'BLOCKED'
+                AND NEW.guard_id = (
+                    SELECT blocked_at_guard
+                    FROM forge_sentinel_assessments
+                    WHERE assessment_id = NEW.assessment_id
+                )
+                AND NEW.verdict = 'PASS'
+                THEN RAISE(ABORT, 'Blocked Guard cannot PASS')
+            END;
+
+            SELECT CASE
+                WHEN (
+                    SELECT status
+                    FROM forge_sentinel_assessments
+                    WHERE assessment_id = NEW.assessment_id
+                ) = 'BLOCKED'
+                AND NEW.guard_id != (
+                    SELECT blocked_at_guard
+                    FROM forge_sentinel_assessments
+                    WHERE assessment_id = NEW.assessment_id
+                )
+                AND NEW.verdict != 'PASS'
+                THEN RAISE(ABORT, 'Only the final Guard may block the sequence')
+            END;
+        END
+        """
+    )
+
+
+
+def _migrate_v22_to_v23(connection: sqlite3.Connection) -> None:
+    """Create immutable, founder-authorised Forge acceptance decisions."""
+    connection.execute("""
+        CREATE TABLE forge_user_acceptance_decisions (
+            decision_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            artifact_ref TEXT NOT NULL,
+            candidate_sha256 TEXT NOT NULL
+                CHECK(
+                    length(candidate_sha256) = 64
+                    AND candidate_sha256 = lower(candidate_sha256)
+                    AND candidate_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            sentinel_assessment_id TEXT NOT NULL,
+            actor_user_id TEXT NOT NULL,
+            decision TEXT NOT NULL
+                CHECK(decision IN ('accepted', 'changes_requested')),
+            live_test_confirmed INTEGER NOT NULL
+                CHECK(live_test_confirmed IN (0, 1)),
+            limitations_disclosed INTEGER NOT NULL
+                CHECK(limitations_disclosed IN (0, 1)),
+            feedback TEXT NOT NULL DEFAULT ''
+                CHECK(length(CAST(feedback AS BLOB)) <= 4096),
+            created_at TEXT NOT NULL,
+
+            FOREIGN KEY(business_id, project_id, job_id)
+                REFERENCES forge_jobs(business_id, project_id, job_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(sentinel_assessment_id)
+                REFERENCES forge_sentinel_assessments(assessment_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(actor_user_id)
+                REFERENCES platform_founders(user_id)
+                ON DELETE RESTRICT,
+
+            CHECK(
+                decision != 'accepted'
+                OR (live_test_confirmed = 1 AND limitations_disclosed = 1)
+            ),
+            CHECK(
+                decision != 'changes_requested'
+                OR length(trim(feedback)) > 0
+            )
+        )
+    """)
+
+    connection.execute("""
+        CREATE INDEX idx_forge_acceptance_job
+        ON forge_user_acceptance_decisions(
+            business_id, project_id, job_id, created_at
+        )
+    """)
+
+    connection.execute("""
+        CREATE INDEX idx_forge_acceptance_artifact
+        ON forge_user_acceptance_decisions(
+            business_id, project_id, job_id, artifact_ref, candidate_sha256
+        )
+    """)
+
+    connection.execute("""
+        CREATE TRIGGER forge_acceptance_no_update
+        BEFORE UPDATE ON forge_user_acceptance_decisions
+        BEGIN
+            SELECT RAISE(ABORT, 'Forge acceptance decisions are immutable');
+        END
+    """)
+
+    connection.execute("""
+        CREATE TRIGGER forge_acceptance_no_delete
+        BEFORE DELETE ON forge_user_acceptance_decisions
+        BEGIN
+            SELECT RAISE(ABORT, 'Forge acceptance decisions are immutable');
+        END
+    """)
+
+    connection.execute("""
+        CREATE TRIGGER forge_acceptance_validate_insert
+        BEFORE INSERT ON forge_user_acceptance_decisions
+        BEGIN
+            SELECT CASE
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM platform_founders f
+                    WHERE f.user_id = NEW.actor_user_id AND f.active = 1
+                )
+                THEN RAISE(ABORT, 'Active founder authority required')
+            END;
+
+            SELECT CASE
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM forge_jobs j
+                    WHERE j.business_id = NEW.business_id
+                      AND j.project_id = NEW.project_id
+                      AND j.job_id = NEW.job_id
+                      AND j.status = 'completed_vaulted'
+                )
+                THEN RAISE(ABORT, 'Completed unlocked Forge job required')
+            END;
+
+            SELECT CASE
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM forge_sentinel_assessments a
+                    WHERE a.assessment_id = NEW.sentinel_assessment_id
+                      AND a.business_id = NEW.business_id
+                      AND a.project_id = NEW.project_id
+                      AND a.job_id = NEW.job_id
+                      AND a.artifact_ref = NEW.artifact_ref
+                      AND a.candidate_sha256 = NEW.candidate_sha256
+                      AND a.status = 'READY_FOR_USER_ACCEPTANCE'
+                )
+                THEN RAISE(ABORT, 'Matching Sentinel assessment required')
+            END;
+
+            SELECT CASE
+                WHEN (
+                    SELECT COUNT(*)
+                    FROM forge_sentinel_guard_results r
+                    WHERE r.assessment_id = NEW.sentinel_assessment_id
+                      AND r.verdict = 'PASS'
+                      AND r.artifact_ref = NEW.artifact_ref
+                      AND r.candidate_sha256 = NEW.candidate_sha256
+                ) != 5
+                THEN RAISE(ABORT, 'All five Sentinel Guards must PASS')
+            END;
+        END
+    """)
+
+
+
+def _migrate_v23_to_v24(connection: sqlite3.Connection) -> None:
+    """Create tenant-scoped integration connections, permissions and secrets."""
+    connection.executescript("""
+        CREATE TABLE integration_connections (
+            connection_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            external_account_id TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('active', 'revoked')),
+            created_at TEXT NOT NULL,
+            revoked_at TEXT,
+            UNIQUE(connection_id, business_id, user_id)
+        );
+
+        CREATE INDEX idx_integration_connections_owner
+        ON integration_connections(business_id, user_id, provider, status);
+
+        CREATE TABLE integration_permissions (
+            permission_id TEXT PRIMARY KEY,
+            connection_id TEXT NOT NULL,
+            business_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            granted_at TEXT NOT NULL,
+            revoked_at TEXT,
+            FOREIGN KEY(connection_id, business_id, user_id)
+                REFERENCES integration_connections(
+                    connection_id, business_id, user_id
+                ) ON DELETE RESTRICT,
+            UNIQUE(connection_id, scope)
+        );
+
+        CREATE INDEX idx_integration_permissions_lookup
+        ON integration_permissions(
+            business_id, user_id, connection_id, scope, revoked_at
+        );
+
+        CREATE TABLE integration_secrets (
+            connection_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            encrypted_payload BLOB NOT NULL,
+            key_version TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(connection_id, business_id)
+                REFERENCES integration_connections(connection_id, business_id)
+                ON DELETE RESTRICT
+        );
+
+        CREATE TABLE integration_audit_events (
+            event_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            connection_id TEXT,
+            event_type TEXT NOT NULL,
+            scope TEXT,
+            created_at TEXT NOT NULL,
+            details_json TEXT NOT NULL DEFAULT '{}'
+        );
+
+        CREATE INDEX idx_integration_audit_tenant
+        ON integration_audit_events(business_id, created_at);
+
+        CREATE TRIGGER integration_audit_no_update
+        BEFORE UPDATE ON integration_audit_events
+        BEGIN
+            SELECT RAISE(ABORT, 'Integration audit events are immutable');
+        END;
+
+        CREATE TRIGGER integration_audit_no_delete
+        BEFORE DELETE ON integration_audit_events
+        BEGIN
+            SELECT RAISE(ABORT, 'Integration audit events are immutable');
+        END;
+    """)
+
+
+
+def _migrate_v24_to_v25(connection: sqlite3.Connection) -> None:
+    """Add the exact unique parent key required by integration secret foreign keys."""
+    connection.execute("""
+        CREATE UNIQUE INDEX idx_integration_connections_secret_fk
+        ON integration_connections(connection_id, business_id)
+    """)
+
+
+
+def _migrate_v25_to_v26(connection: sqlite3.Connection) -> None:
+    """Store short-lived, single-use OAuth authorisation attempts."""
+    connection.execute("""
+        CREATE TABLE oauth_authorization_attempts (
+            state_hash TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            redirect_uri TEXT NOT NULL,
+            encrypted_code_verifier BLOB NOT NULL,
+            key_version TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            consumed_at TEXT
+        )
+    """)
+    connection.execute("""
+        CREATE INDEX idx_oauth_attempts_owner
+        ON oauth_authorization_attempts(
+            business_id, user_id, provider, expires_at
+        )
+    """)
+
+
+
+def _migrate_v26_to_v27(connection: sqlite3.Connection) -> None:
+    connection.execute("""
+        CREATE TABLE owner_lifestyle_preferences (
+            business_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            timezone TEXT NOT NULL DEFAULT 'UTC',
+            wake_time TEXT,
+            sleep_time TEXT,
+            work_start TEXT,
+            work_end TEXT,
+            quiet_start TEXT,
+            quiet_end TEXT,
+            briefing_enabled INTEGER NOT NULL DEFAULT 1,
+            briefing_time TEXT NOT NULL DEFAULT '07:00',
+            initiative_level TEXT NOT NULL DEFAULT 'balanced',
+            personality TEXT NOT NULL DEFAULT 'natural',
+            preferred_channels TEXT NOT NULL DEFAULT '["whatsapp"]',
+            critical_alerts_during_quiet INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (business_id, user_id),
+            FOREIGN KEY (business_id) REFERENCES businesses(business_id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE owner_routine_suggestions (
+            suggestion_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            field_name TEXT NOT NULL,
+            proposed_value TEXT NOT NULL,
+            observation_count INTEGER NOT NULL DEFAULT 1,
+            first_observed_at TEXT NOT NULL,
+            last_observed_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'accepted', 'rejected')),
+            resolved_at TEXT,
+            UNIQUE(business_id, user_id, field_name, proposed_value),
+            FOREIGN KEY(business_id, user_id)
+                REFERENCES owner_lifestyle_preferences(business_id, user_id)
+                ON DELETE CASCADE
+        )
+    """)
+    connection.execute("""
+        CREATE INDEX idx_owner_routine_pending
+        ON owner_routine_suggestions(business_id, user_id, status)
+    """)
+
+
+
+def _migrate_v27_to_v28(connection: sqlite3.Connection) -> None:
+    connection.execute("""
+        CREATE TABLE attention_events (
+            event_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            severity TEXT NOT NULL
+                CHECK(severity IN ('critical', 'important', 'routine')),
+            title TEXT NOT NULL,
+            details TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            action TEXT NOT NULL
+                CHECK(action IN ('interrupt', 'deliver', 'defer', 'briefing', 'queue')),
+            reason TEXT NOT NULL,
+            evaluated_at TEXT NOT NULL,
+            local_time TEXT NOT NULL,
+            quiet_hours_active INTEGER NOT NULL DEFAULT 0,
+            deliver_after TEXT,
+            status TEXT NOT NULL
+                CHECK(status IN (
+                    'queued', 'deferred', 'briefing',
+                    'delivered', 'acknowledged', 'failed'
+                )),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            provider_message_id TEXT,
+            last_attempt_at TEXT,
+            delivered_at TEXT,
+            acknowledged_at TEXT,
+            failure_reason TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(business_id, user_id, idempotency_key),
+            FOREIGN KEY(business_id, user_id)
+                REFERENCES owner_lifestyle_preferences(business_id, user_id)
+                ON DELETE CASCADE
+        )
+    """)
+    connection.execute("""
+        CREATE INDEX idx_attention_events_pending
+        ON attention_events(business_id, user_id, status, created_at)
+    """)
+    connection.execute("""
+        CREATE INDEX idx_attention_events_due
+        ON attention_events(status, deliver_after)
+    """)
+
+
+
+
+def _migrate_v28_to_v29(connection: sqlite3.Connection) -> None:
+    """Add durable worker leases and retry scheduling to attention events."""
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(attention_events)")
+    }
+    additions = {
+        "claim_token": "TEXT",
+        "claimed_by": "TEXT",
+        "claimed_at": "TEXT",
+        "lease_expires_at": "TEXT",
+        "retry_after": "TEXT",
+    }
+    for name, sql_type in additions.items():
+        if name not in columns:
+            connection.execute(
+                f"ALTER TABLE attention_events ADD COLUMN {name} {sql_type}"
+            )
+
+    connection.execute("""
+        CREATE INDEX IF NOT EXISTS idx_attention_events_claimable
+        ON attention_events(status, deliver_after, retry_after, lease_expires_at)
+    """)
+
+
+
+def _migrate_v29_to_v30(connection: sqlite3.Connection) -> None:
+    """Create tenant-scoped multi-channel owner communication storage."""
+    connection.execute("""
+        CREATE TABLE owner_communication_channels (
+            endpoint_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            channel TEXT NOT NULL CHECK(
+                channel IN ('whatsapp', 'sms', 'email', 'voice', 'companion_app')
+            ),
+            encrypted_endpoint BLOB NOT NULL,
+            key_version TEXT NOT NULL,
+            endpoint_fingerprint TEXT NOT NULL,
+            verified_at TEXT,
+            consent_granted_at TEXT,
+            revoked_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(business_id, user_id, channel, endpoint_fingerprint),
+            FOREIGN KEY(business_id, user_id)
+                REFERENCES owner_lifestyle_preferences(business_id, user_id)
+                ON DELETE CASCADE
+        )
+    """)
+    connection.execute("""
+        CREATE INDEX idx_owner_channels_enabled
+        ON owner_communication_channels(
+            business_id, user_id, channel, revoked_at, verified_at
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE tenant_communication_identities (
+            business_id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            encrypted_identity BLOB NOT NULL,
+            key_version TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(
+                status IN ('pending', 'active', 'suspended', 'released')
+            ),
+            provisioned_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE attention_delivery_attempts (
+            delivery_id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL,
+            business_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            endpoint_id TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN (
+                'queued', 'claimed', 'sent', 'delivered',
+                'acknowledged', 'failed', 'unknown', 'cancelled'
+            )),
+            attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+            max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts > 0),
+            next_attempt_at TEXT,
+            claim_token TEXT,
+            lease_expires_at TEXT,
+            provider_reference TEXT,
+            last_attempt_at TEXT,
+            delivered_at TEXT,
+            acknowledged_at TEXT,
+            failure_reason TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(event_id, endpoint_id),
+            FOREIGN KEY(event_id) REFERENCES attention_events(event_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(endpoint_id) REFERENCES owner_communication_channels(endpoint_id)
+                ON DELETE RESTRICT
+        )
+    """)
+    connection.execute("""
+        CREATE INDEX idx_attention_delivery_due
+        ON attention_delivery_attempts(status, next_attempt_at, lease_expires_at)
+    """)
+    connection.execute("""
+        CREATE INDEX idx_attention_delivery_tenant
+        ON attention_delivery_attempts(business_id, user_id, event_id)
+    """)
+
+def _migrate_v30_to_v31(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "ALTER TABLE attention_delivery_attempts ADD COLUMN claimed_by TEXT"
+    )
+
+
+def _migrate_v31_to_v32(connection: sqlite3.Connection) -> None:
+    """Create durable subscription, mandate, manual-payment and billing ledgers."""
+
+    connection.execute("""
+        CREATE TABLE subscription_plans (
+            plan_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            amount TEXT NOT NULL CHECK(CAST(amount AS REAL) > 0),
+            currency TEXT NOT NULL
+                CHECK(length(currency) = 3 AND currency = upper(currency)),
+            interval_months INTEGER NOT NULL CHECK(interval_months > 0),
+            active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    connection.execute("""
+        CREATE TABLE business_subscriptions (
+            subscription_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            plan_id TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN (
+                'pending', 'active', 'past_due', 'cancelled', 'expired'
+            )),
+            current_period_start TEXT,
+            current_period_end TEXT,
+            cancel_at_period_end INTEGER NOT NULL DEFAULT 0
+                CHECK(cancel_at_period_end IN (0, 1)),
+            cancelled_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK(
+                (current_period_start IS NULL AND current_period_end IS NULL)
+                OR
+                (current_period_start IS NOT NULL
+                 AND current_period_end IS NOT NULL
+                 AND current_period_end > current_period_start)
+            ),
+            FOREIGN KEY(business_id) REFERENCES businesses(business_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(plan_id) REFERENCES subscription_plans(plan_id)
+                ON DELETE RESTRICT
+        )
+    """)
+
+    connection.execute("""
+        CREATE UNIQUE INDEX idx_one_open_subscription_per_business
+        ON business_subscriptions(business_id)
+        WHERE status IN ('pending', 'active', 'past_due')
+    """)
+
+    connection.execute("""
+        CREATE INDEX idx_subscription_due_period
+        ON business_subscriptions(status, current_period_end)
+    """)
+
+    connection.execute("""
+        CREATE TABLE recurring_payment_mandates (
+            mandate_id TEXT PRIMARY KEY,
+            subscription_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            provider_mandate_id TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN (
+                'pending', 'active', 'revoked', 'failed'
+            )),
+            approved_by_user_id TEXT NOT NULL,
+            approved_at TEXT NOT NULL,
+            consent_version TEXT NOT NULL,
+            authorised_at TEXT,
+            revoked_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(provider, provider_mandate_id),
+            FOREIGN KEY(subscription_id)
+                REFERENCES business_subscriptions(subscription_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(approved_by_user_id) REFERENCES users(user_id)
+                ON DELETE RESTRICT
+        )
+    """)
+
+    connection.execute("""
+        CREATE INDEX idx_recurring_mandates_subscription
+        ON recurring_payment_mandates(subscription_id, status)
+    """)
+
+    connection.execute("""
+        CREATE TABLE manual_payment_requests (
+            request_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            subscription_id TEXT NOT NULL,
+            submitted_by_user_id TEXT NOT NULL,
+            amount TEXT NOT NULL CHECK(CAST(amount AS REAL) > 0),
+            currency TEXT NOT NULL
+                CHECK(length(currency) = 3 AND currency = upper(currency)),
+            payment_reference TEXT NOT NULL,
+            evidence_reference TEXT,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN (
+                'pending', 'verified', 'rejected', 'cancelled'
+            )),
+            reviewed_by_user_id TEXT,
+            review_reason TEXT,
+            submitted_at TEXT NOT NULL,
+            reviewed_at TEXT,
+            FOREIGN KEY(business_id) REFERENCES businesses(business_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(subscription_id)
+                REFERENCES business_subscriptions(subscription_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(submitted_by_user_id) REFERENCES users(user_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(reviewed_by_user_id) REFERENCES users(user_id)
+                ON DELETE RESTRICT
+        )
+    """)
+
+    connection.execute("""
+        CREATE INDEX idx_manual_payment_review_queue
+        ON manual_payment_requests(status, submitted_at)
+    """)
+
+    connection.execute("""
+        CREATE TABLE subscription_billing_periods (
+            billing_period_id TEXT PRIMARY KEY,
+            subscription_id TEXT NOT NULL,
+            business_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            provider_event_id TEXT NOT NULL,
+            period_start TEXT NOT NULL,
+            period_end TEXT NOT NULL,
+            amount TEXT NOT NULL CHECK(CAST(amount AS REAL) > 0),
+            currency TEXT NOT NULL
+                CHECK(length(currency) = 3 AND currency = upper(currency)),
+            paid_at TEXT NOT NULL,
+            recorded_at TEXT NOT NULL,
+            CHECK(period_end > period_start),
+            UNIQUE(provider, provider_event_id),
+            UNIQUE(subscription_id, period_start),
+            FOREIGN KEY(subscription_id)
+                REFERENCES business_subscriptions(subscription_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(business_id) REFERENCES businesses(business_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(provider, provider_event_id)
+                REFERENCES purchase_records(provider, provider_event_id)
+                ON DELETE RESTRICT
+        )
+    """)
+
+    connection.execute("""
+        CREATE INDEX idx_billing_period_business
+        ON subscription_billing_periods(business_id, period_end)
+    """)
+
+
+
+def _migrate_v32_to_v33(conn: sqlite3.Connection) -> None:
+    """Create durable records for provider checkout attempts."""
+    conn.execute("""
+        CREATE TABLE payment_attempts (
+            attempt_id TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            subscription_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            amount TEXT NOT NULL,
+            currency TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'created'
+                CHECK (status IN (
+                    'created', 'checkout_created', 'pending',
+                    'failed', 'expired', 'cancelled', 'settled'
+                )),
+            provider_checkout_id TEXT,
+            provider_payment_id TEXT,
+            checkout_url TEXT,
+            failure_reason TEXT,
+            expires_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (business_id, idempotency_key),
+            UNIQUE (provider, provider_checkout_id),
+            UNIQUE (provider, provider_payment_id)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX idx_payment_attempts_business_status
+        ON payment_attempts (business_id, status, created_at)
+    """)
+    conn.execute("""
+        CREATE INDEX idx_payment_attempts_subscription_status
+        ON payment_attempts (subscription_id, business_id, status)
+    """)
+
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
@@ -1587,6 +2455,18 @@ MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     18: _migrate_v18_to_v19,
     19: _migrate_v19_to_v20,
     20: _migrate_v20_to_v21,
+    21: _migrate_v21_to_v22,
+    22: _migrate_v22_to_v23,
+    23: _migrate_v23_to_v24,
+    24: _migrate_v24_to_v25,
+    25: _migrate_v25_to_v26,
+    26: _migrate_v26_to_v27,
+    27: _migrate_v27_to_v28,
+    28: _migrate_v28_to_v29,
+    29: _migrate_v29_to_v30,
+    30: _migrate_v30_to_v31,
+    31: _migrate_v31_to_v32,
+    32: _migrate_v32_to_v33,
 }
 
 # Backwards-compatible name for callers that imported SCHEMA.

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect WhatsApp Business | Amination AI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <style>
+    .wa-connect{max-width:680px;margin:48px auto;padding:28px;border-radius:16px}
+    .wa-connect button{padding:13px 20px;border:0;border-radius:9px;cursor:pointer}
+    .wa-connect button:disabled{opacity:.55;cursor:wait}
+    #wa-status{margin-top:18px;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+  <main class="wa-connect">
+    <h1>Connect WhatsApp Business</h1>
+    <p>Connect a WhatsApp Business Account to Amination AI.</p>
+    <p>Only a business owner or administrator can start this process.</p>
+    <p>Your Meta access token is exchanged and stored by the server. It is never displayed in this page.</p>
+    <label><input id="wa-consent" type="checkbox"> I authorise Amination AI to connect this business's WhatsApp account and securely store its access credentials.</label>
+    <button id="wa-connect-button" type="button" disabled>Continue with Meta</button>
+    <p id="wa-status" role="status" aria-live="polite">Ready when you are.</p>
+    <p><a href="/dashboard">Return to dashboard</a></p>
+  </main>
+  <script
+    src="{{ url_for('static', filename='meta-whatsapp-signup.js') }}"
+    defer
+    data-app-id="{{ meta_app_id }}"
+    data-config-id="{{ config_id }}"
+    data-graph-version="{{ graph_api_version }}"
+    data-signup-version="{{ signup_version }}">
+  </script>
+</body>
+</html>

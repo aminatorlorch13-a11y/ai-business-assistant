@@ -751,3 +751,174 @@ def test_forge_terminal_open_enforces_authenticated_business_scope(tmp_path):
         (owner_business, "same-project", "same-job"),
         (other_business, "same-project", "same-job"),
     ]
+
+
+def test_owner_can_immediately_cancel_own_pending_subscription(tmp_path):
+    from decimal import Decimal
+
+    app, _ = make_app(tmp_path)
+    client = app.test_client()
+    signup(client)
+    login(client)
+
+    business_id = client.get("/api/me").get_json()["business_id"]
+    subscriptions = app.extensions["assistant_subscription_repository"]
+    now = datetime.now(timezone.utc)
+
+    subscriptions.create_plan(
+        plan_id="test-plan",
+        name="Test Plan",
+        amount=Decimal("99.00"),
+        currency="ZAR",
+        interval_months=1,
+        now=now,
+    )
+    subscriptions.create_subscription(
+        subscription_id="test-subscription",
+        business_id=business_id,
+        plan_id="test-plan",
+        now=now,
+    )
+
+    response = client.post(
+        "/api/owner/subscriptions/test-subscription/cancel",
+        json={"at_period_end": False},
+        headers={"X-CSRF-Token": csrf(client)},
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()
+    assert result["changed"] is True
+    assert result["provider_cancellation_performed"] is False
+    assert result["business_access_changed"] is False
+
+    subscription = subscriptions.get_subscription("test-subscription")
+    assert subscription["status"] == "cancelled"
+
+
+
+def test_other_business_owner_cannot_cancel_subscription(tmp_path):
+    from decimal import Decimal
+
+    app, _ = make_app(tmp_path)
+    owner_one = app.test_client()
+    signup(owner_one)
+    login(owner_one)
+
+    business_one = owner_one.get("/api/me").get_json()["business_id"]
+    subscriptions = app.extensions["assistant_subscription_repository"]
+    now = datetime.now(timezone.utc)
+
+    subscriptions.create_plan(
+        plan_id="tenant-test-plan",
+        name="Tenant Test Plan",
+        amount=Decimal("99.00"),
+        currency="ZAR",
+        interval_months=1,
+        now=now,
+    )
+    subscriptions.create_subscription(
+        subscription_id="private-subscription",
+        business_id=business_one,
+        plan_id="tenant-test-plan",
+        now=now,
+    )
+
+    owner_two = app.test_client()
+    token = csrf(owner_two)
+    signup_response = owner_two.post(
+        "/api/auth/signup",
+        json={
+            "display_name": "Second Owner",
+            "email": "second-owner@example.com",
+            "password": "another correct horse battery staple",
+            "business_name": "Second Business",
+            "assistant_name": "Orbit Two",
+            "assistant_voice": "male",
+        },
+        headers={"X-CSRF-Token": token},
+    )
+    assert signup_response.status_code == 201
+
+    token = csrf(owner_two)
+    login_response = owner_two.post(
+        "/api/auth/login",
+        json={
+            "email": "second-owner@example.com",
+            "password": "another correct horse battery staple",
+        },
+        headers={"X-CSRF-Token": token},
+    )
+    assert login_response.status_code == 200
+
+    response = owner_two.post(
+        "/api/owner/subscriptions/private-subscription/cancel",
+        json={"at_period_end": False},
+        headers={"X-CSRF-Token": csrf(owner_two)},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Subscription not found."}
+    assert subscriptions.get_subscription("private-subscription")["status"] == "pending"
+
+
+
+def test_business_member_cannot_cancel_subscription(tmp_path):
+    from decimal import Decimal
+
+    app, db = make_app(tmp_path)
+    client = app.test_client()
+    signup(client)
+    login(client)
+
+    business_id = client.get("/api/me").get_json()["business_id"]
+    memberships = SQLiteMembershipRepository(db)
+    membership = memberships.list_for_business(business_id)[0]
+
+    memberships.save(
+        BusinessMembership(
+            user_id=membership.user_id,
+            business_id=business_id,
+            role=UserRole.MEMBER,
+        )
+    )
+
+    logout_response = client.post(
+        "/api/auth/logout",
+        headers={"X-CSRF-Token": csrf(client)},
+    )
+    assert logout_response.status_code == 200
+    login(client)
+
+    subscriptions = app.extensions["assistant_subscription_repository"]
+    now = datetime.now(timezone.utc)
+
+    subscriptions.create_plan(
+        plan_id="member-test-plan",
+        name="Member Test Plan",
+        amount=Decimal("99.00"),
+        currency="ZAR",
+        interval_months=1,
+        now=now,
+    )
+    subscriptions.create_subscription(
+        subscription_id="member-private-subscription",
+        business_id=business_id,
+        plan_id="member-test-plan",
+        now=now,
+    )
+
+    response = client.post(
+        "/api/owner/subscriptions/member-private-subscription/cancel",
+        json={"at_period_end": False},
+        headers={"X-CSRF-Token": csrf(client)},
+    )
+
+    assert response.status_code == 403
+    assert response.get_json() == {
+        "error": "Only the business owner may cancel a subscription."
+    }
+    assert subscriptions.get_subscription(
+        "member-private-subscription"
+    )["status"] == "pending"
+

@@ -30,7 +30,7 @@ def repository_store(tmp_path):
 
 def test_schema_migrates_to_repository_binding_version(repository_store):
     database, _ = repository_store
-    assert SCHEMA_VERSION == 21
+    assert SCHEMA_VERSION >= 21
     with database.connection() as connection:
         version = connection.execute(
             "SELECT value FROM persistence_metadata WHERE key = 'schema_version'"
@@ -41,7 +41,7 @@ def test_schema_migrates_to_repository_binding_version(repository_store):
                 "PRAGMA table_info(forge_project_repositories)"
             ).fetchall()
         }
-    assert version == "21"
+    assert version == str(SCHEMA_VERSION)
     assert {
         "business_id", "project_id", "provider", "repository_owner",
         "repository_name", "default_branch", "created_at", "updated_at",

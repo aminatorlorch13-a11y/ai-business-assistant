@@ -1,6 +1,6 @@
 import pytest
 
-from app.persistence.database import SCHEMA_VERSION, SQLiteDatabase
+from app.persistence.database import BASE_SCHEMA, MIGRATIONS, SCHEMA_VERSION, SQLiteDatabase
 
 
 def schema_version(database):
@@ -11,46 +11,66 @@ def schema_version(database):
     return int(row["value"])
 
 
+def database_at_schema_version(path, target_version):
+    """Create a genuine database at the requested historical schema version."""
+    if not isinstance(target_version, int) or not 1 <= target_version <= SCHEMA_VERSION:
+        raise ValueError(f"Invalid target schema version: {target_version}")
+
+    database = SQLiteDatabase(path)
+    with database.connection() as connection:
+        connection.executescript(BASE_SCHEMA)
+        connection.execute(
+            "INSERT INTO persistence_metadata(key, value) VALUES ('schema_version', '1')"
+        )
+
+        for version in range(1, target_version):
+            migration = MIGRATIONS.get(version)
+            if migration is None:
+                raise RuntimeError(f"Missing migration {version}")
+
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                migration(connection)
+                connection.execute(
+                    "UPDATE persistence_metadata SET value = ? WHERE key = 'schema_version'",
+                    (str(version + 1),),
+                )
+            except Exception:
+                connection.rollback()
+                raise
+            else:
+                connection.commit()
+
+    return database
+
+
+
 def test_fresh_database_creates_forge_artifact_table(tmp_path):
     database = SQLiteDatabase(tmp_path / "fresh.sqlite3")
     database.initialize()
 
-    assert SCHEMA_VERSION == 21
-    assert schema_version(database) == 21
+    assert schema_version(database) == SCHEMA_VERSION
 
     with database.connection() as connection:
         columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(forge_artifacts)")
         }
+        project_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'forge_projects'"
+        ).fetchone()
 
     assert {
-        "artifact_id",
-        "business_id",
-        "project_id",
-        "sha256",
-        "size_bytes",
-        "media_type",
-        "storage_key",
-        "created_at",
+        "artifact_id", "business_id", "project_id", "sha256",
+        "size_bytes", "media_type", "storage_key", "created_at",
     } <= columns
-
-    with database.connection() as connection:
-        project_table = connection.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'forge_projects'"
-        ).fetchone()
     assert project_table is not None
 
 
 def test_v14_database_migrates_without_losing_business_data(tmp_path):
-    database = SQLiteDatabase(tmp_path / "upgrade.sqlite3")
-    database.initialize()
+    database = database_at_schema_version(tmp_path / "upgrade.sqlite3", 14)
 
     with database.transaction() as connection:
-        connection.execute("DROP TABLE forge_task_specs")
-        connection.execute("DROP TABLE forge_project_repositories")
-        connection.execute("DROP TABLE forge_jobs")
         connection.execute(
             """
             INSERT INTO businesses(
@@ -59,20 +79,10 @@ def test_v14_database_migrates_without_losing_business_data(tmp_path):
             """,
             ("existing-business", "Existing", "Owner", "Assistant", "male"),
         )
-        connection.execute(
-            """
-            UPDATE persistence_metadata
-            SET value = '14'
-            WHERE key = 'schema_version'
-            """
-        )
-        connection.execute("DROP TABLE forge_artifacts")
 
     assert schema_version(database) == 14
-
     database.initialize()
-
-    assert schema_version(database) == 21
+    assert schema_version(database) == SCHEMA_VERSION
 
     with database.connection() as connection:
         business = connection.execute(
@@ -80,15 +90,11 @@ def test_v14_database_migrates_without_losing_business_data(tmp_path):
             ("existing-business",),
         ).fetchone()
         artifact_table = connection.execute(
-            """
-            SELECT name FROM sqlite_master
-            WHERE type = 'table' AND name = 'forge_artifacts'
-            """
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'forge_artifacts'"
         ).fetchone()
 
     assert business["name"] == "Existing"
     assert artifact_table is not None
-
 
 def test_artifact_table_rejects_invalid_digest_and_negative_size(tmp_path):
     database = SQLiteDatabase(tmp_path / "constraints.sqlite3")
@@ -142,16 +148,13 @@ def test_artifact_table_rejects_invalid_digest_and_negative_size(tmp_path):
 
 
 
+
 def test_v15_artifacts_restrict_business_deletion(tmp_path):
     import sqlite3
 
-    database = SQLiteDatabase(tmp_path / "v15-upgrade.sqlite3")
-    database.initialize()
+    database = database_at_schema_version(tmp_path / "v15-upgrade.sqlite3", 15)
 
     with database.transaction() as connection:
-        connection.execute("DROP TABLE forge_task_specs")
-        connection.execute("DROP TABLE forge_project_repositories")
-        connection.execute("DROP TABLE forge_jobs")
         connection.execute(
             """
             INSERT INTO businesses(
@@ -161,49 +164,22 @@ def test_v15_artifacts_restrict_business_deletion(tmp_path):
             ("protected-business", "Protected", "Owner", "Assistant", "male"),
         )
         connection.execute(
-            """
-            INSERT INTO forge_projects (
-                business_id, project_id, name, description, status,
-                created_at, updated_at, legacy_imported
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            ("protected-business", "project-1", "Project", "", "ACTIVE",
-             "2026-11-03T00:00:00+00:00",
-             "2026-11-03T00:00:00+00:00", 0),
-        )
-        connection.execute(
-            """
-            INSERT INTO forge_artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+            "INSERT INTO forge_artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                "artifact-preserved",
-                "protected-business",
-                "project-1",
-                "a" * 64,
-                12,
-                "text/plain",
-                "a" * 64,
+                "artifact-preserved", "protected-business", "project-1",
+                "a" * 64, 12, "text/plain", "a" * 64,
                 "2026-11-03T00:00:00+00:00",
             ),
         )
-        connection.execute(
-            """
-            UPDATE persistence_metadata
-            SET value = '15'
-            WHERE key = 'schema_version'
-            """
-        )
 
     database.initialize()
-
-    assert schema_version(database) == 21
+    assert schema_version(database) == SCHEMA_VERSION
 
     with database.connection() as connection:
         artifact = connection.execute(
             """
             SELECT business_id, sha256, size_bytes
-            FROM forge_artifacts
-            WHERE artifact_id = ?
+            FROM forge_artifacts WHERE artifact_id = ?
             """,
             ("artifact-preserved",),
         ).fetchone()
@@ -220,17 +196,12 @@ def test_v15_artifacts_restrict_business_deletion(tmp_path):
             )
 
 
-
 def test_v16_migration_backfills_tenant_scoped_projects_and_preserves_artifacts(tmp_path):
     import sqlite3
 
-    database = SQLiteDatabase(tmp_path / "v16-upgrade.sqlite3")
-    database.initialize()
+    database = database_at_schema_version(tmp_path / "v16-upgrade.sqlite3", 16)
 
     with database.transaction() as connection:
-        connection.execute("DROP TABLE forge_task_specs")
-        connection.execute("DROP TABLE forge_project_repositories")
-        connection.execute("DROP TABLE forge_jobs")
         for business_id in ("tenant-a", "tenant-b"):
             connection.execute(
                 """
@@ -240,33 +211,6 @@ def test_v16_migration_backfills_tenant_scoped_projects_and_preserves_artifacts(
                 """,
                 (business_id, business_id, "Owner", "Assistant", "male"),
             )
-
-        connection.execute("DROP TABLE forge_artifacts")
-        connection.execute("DROP TABLE forge_projects")
-        connection.execute(
-            """
-            CREATE TABLE forge_artifacts (
-                artifact_id TEXT PRIMARY KEY,
-                business_id TEXT NOT NULL
-                    REFERENCES businesses(business_id) ON DELETE RESTRICT,
-                project_id TEXT NOT NULL,
-                sha256 TEXT NOT NULL CHECK(
-                    length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'
-                ),
-                size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
-                media_type TEXT NOT NULL CHECK(length(trim(media_type)) > 0),
-                storage_key TEXT NOT NULL CHECK(length(trim(storage_key)) > 0),
-                created_at TEXT NOT NULL CHECK(length(trim(created_at)) > 0),
-                UNIQUE(business_id, project_id, artifact_id)
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE INDEX idx_forge_artifacts_project
-            ON forge_artifacts(business_id, project_id, created_at)
-            """
-        )
 
         old_artifacts = (
             ("a-1", "tenant-a", "shared", "1" * 64, 10, "text/plain", "1" * 64, "2026-11-01T08:00:00+00:00"),
@@ -278,13 +222,10 @@ def test_v16_migration_backfills_tenant_scoped_projects_and_preserves_artifacts(
             "INSERT INTO forge_artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             old_artifacts,
         )
-        connection.execute(
-            "UPDATE persistence_metadata SET value = '16' WHERE key = 'schema_version'"
-        )
 
     assert schema_version(database) == 16
     database.initialize()
-    assert schema_version(database) == 21
+    assert schema_version(database) == SCHEMA_VERSION
 
     with database.connection() as connection:
         projects = connection.execute(
@@ -319,21 +260,10 @@ def test_v16_migration_backfills_tenant_scoped_projects_and_preserves_artifacts(
 
 
 def test_v17_database_migrates_to_v18_with_tenant_scoped_forge_jobs(tmp_path):
-    database = SQLiteDatabase(tmp_path / "v17-upgrade.sqlite3")
-    database.initialize()
-
-    with database.transaction() as connection:
-        connection.execute("DROP TABLE forge_task_specs")
-        connection.execute("DROP TABLE forge_project_repositories")
-        connection.execute("DROP TABLE forge_jobs")
-        connection.execute(
-            "UPDATE persistence_metadata SET value = '17' "
-            "WHERE key = 'schema_version'"
-        )
+    database = database_at_schema_version(tmp_path / "v17-upgrade.sqlite3", 17)
 
     database.initialize()
-
-    assert schema_version(database) == 21
+    assert schema_version(database) == SCHEMA_VERSION
 
     with database.connection() as connection:
         columns = {
@@ -355,7 +285,6 @@ def test_v17_database_migrates_to_v18_with_tenant_scoped_forge_jobs(tmp_path):
         "cancellation_requested", "checkpoint_json",
         "error_code", "error_message", "revision",
     } <= columns
-
     assert any(row["table"] == "businesses" for row in foreign_keys)
     assert any(row["table"] == "forge_projects" for row in foreign_keys)
     assert "idx_forge_jobs_project_created" in indexes
